@@ -1,0 +1,103 @@
+SD Card Tool - portabel
+=======================
+
+Das Ecodan SD Card Tool (ATW Service Tool, Ver. 8.02) ohne Installation:
+entpacken, starten, fertig. Einstellungen und Logdateien bleiben in
+diesem Ordner und wandern mit dem Stick.
+
+
+Starten
+-------
+
+    SD-Card-Tool.cmd   doppelklicken
+
+Das Konsolenfenster bitte offen lassen, solange das Werkzeug laeuft - es
+raeumt beim Beenden auf. Erst das SD Card Tool schliessen, dann geht das
+Fenster von selbst zu.
+
+
+Ordner
+------
+
+    App\        Programmdateien des Herstellers, unveraendert,
+                dazu ATW.exe.config (siehe unten)
+    Data\
+      Config\   Einstellungen des Werkzeugs (Sprache, Graphen, Menue)
+      Log\      Programmlogs von ATW.exe
+
+Data\ ist der Teil, der mitwandert. Wer den Ordner sichert, sichert seine
+Einstellungen.
+
+
+Was daran portabel ist
+----------------------
+
+Das Original legt seine Einstellungen unter %APPDATA%\ATW ab, also im
+Benutzerprofil des jeweiligen Rechners. Der Start ueber SD-Card-Tool.cmd
+haengt diesen Pfad waehrend des Laufs an Data\ hier im Ordner:
+
+  * Bevorzugt als Verzweigung (Junction). Das Werkzeug schreibt dann
+    unmittelbar hierher. Dafuer sind keine Administratorrechte noetig.
+  * Klappt das nicht, wird vor dem Start hin- und nach dem Beenden
+    zurueckkopiert.
+
+Ein vorhandenes %APPDATA%\ATW eines installierten Originals wird waehrend
+des Laufs nach %APPDATA%\ATW.vor-portable beiseite gelegt und danach
+zurueckbenannt. Beide Fassungen kommen sich also nicht ins Gehege.
+
+Bricht ein Lauf ab (Fenster geschlossen, Stromausfall), erkennt der
+naechste Start den Rest an der Kennungsdatei, holt die Einstellungen
+zurueck und raeumt ihn weg.
+
+
+.NET Framework
+--------------
+
+ATW.exe ist gegen .NET Framework 2.0 gebaut. Windows 10 und 11 bringen
+diesen Zweig nicht mehr mit. App\ATW.exe.config erlaubt deshalb den
+Start auf der 4.x-Laufzeit, die seit Windows 8 zum System gehoert.
+
+Ist .NET Framework 3.5 auf dem Rechner aktiviert, laeuft das Werkzeug
+weiterhin auf der urspruenglichen 2.0-Laufzeit - die Datei nennt sie
+zuerst.
+
+Sollte Windows trotzdem nach .NET 3.5 fragen, fehlt ATW.exe.config oder
+sie liegt nicht neben ATW.exe.
+
+
+Wenn der Ordner aus einem heruntergeladenen ZIP stammt
+------------------------------------------------------
+
+Windows markiert heruntergeladene Dateien. Am einfachsten vor dem
+Entpacken: Rechtsklick auf das ZIP, Eigenschaften, unten "Zulassen"
+ankreuzen, dann erst entpacken.
+
+
+Bekannte Eigenheiten
+--------------------
+
+  * Nur eine Instanz gleichzeitig aus demselben Ordner. Ein zweiter
+    Start bricht mit einem Hinweis ab.
+  * Die Dateidialoge zeigen beim allerersten Mal "Eigene Dateien". Ab
+    dem zweiten Mal steht dort der zuletzt benutzte Ordner, also das
+    SD-Kartenlaufwerk. Diese Merkfaehigkeit steckt in Data\Config und
+    wandert damit mit.
+  * Auf hochaufloesenden Bildschirmen skaliert Windows die Oberflaeche
+    und sie wirkt etwas weich. Das Programm stammt von 2013 und hat
+    feste Layouts; eine schaerfere Einstellung wuerde die Dialoge
+    zerreissen.
+  * Teigi\Graph_Info2.txt liefert der Hersteller nicht mit, obwohl
+    ATW.exe die Datei kennt. Das betrifft die zweite Auswerteseite und
+    ist im Original genauso.
+  * Der Hersteller-Ordner heisst im Original
+    "SD_TOOL_Ver8.02(Installer level_2013_0426)". Er liegt hier
+    unveraendert unter App\, nur ohne die Klammern im Namen.
+
+
+Was nicht veraendert wurde
+--------------------------
+
+ATW.exe und die mitgelieferten Bibliotheken sind Bit fuer Bit die
+Originaldateien. Dazugekommen sind nur ATW.exe.config, diese Datei und
+der Starter. Nichts wird in die Registry geschrieben - das Original tut
+das von sich aus nicht.

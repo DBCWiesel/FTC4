@@ -1,0 +1,3 @@
+Kennung des portablen SD Card Tool.
+An dieser Datei erkennt SD-Card-Tool.cmd den eigenen Datenordner.
+Bitte nicht loeschen.

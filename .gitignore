@@ -15,3 +15,7 @@ data/*.DAT
 data/logs/
 # Herstellertabellen gehoeren zum SD_TOOL, nicht hierher
 data/Teigi/
+
+# Ergebnis von tools/sdtool_portable/build.sh - Herstellerbinaerdateien
+SDCardTool-Portable/
+SDCardTool-Portable.zip

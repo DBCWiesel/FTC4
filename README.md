@@ -13,9 +13,11 @@ src/temperature_decoder.py           Rechenschicht: 0,5-°C-Kodierung
 tests/                               273 Tests
 docs/HOME_ASSISTANT.md               Werte aus HA holen und zuordnen
 docs/SD_TOOL.md                      was das Hersteller-Werkzeug preisgibt
+docs/SD_TOOL_PORTABLE.md             dasselbe Werkzeug ohne Installation
 docs/DAT_FORMAT.md                   DAT-Format: Record-Struktur
 docs/LOG_FORMAT.md                   LOG-Format: Aufbau und Feldzuordnung
 docs/TEMPERATURE_DECODING.md         Temperaturkodierungen im Überblick
+tools/sdtool_portable/               baut die portable Fassung
 ```
 
 ## Alles auf einmal
@@ -38,6 +40,22 @@ python3 -m src.rc_settings /pfad/SD_TOOL/Teigi/RCSetting_EN.xls data
 
 Nennt je Eintrag Titel, Rohwert, erschlossenen Wert und dokumentierten Bereich.
 Siehe `docs/SD_TOOL.md`.
+
+## Das Hersteller-Werkzeug portabel
+
+Das SD_TOOL kommt als Installationsordner und legt seine Einstellungen unter
+`%APPDATA%\ATW` ab. Aus dem Hersteller-Archiv wird eine Fassung, die sich
+entpacken und starten lässt und den Rechner unverändert zurücklässt:
+
+```bash
+tools/sdtool_portable/build.sh SDCardToolv21.zip ~/ausgabe
+```
+
+Einstellungen und Logs bleiben dann im Paket, `ATW.exe` läuft auch ohne
+nachinstalliertes .NET Framework 3.5. Die Herstellerdateien selbst gehören
+nicht ins Repository — das Skript holt sie zur Bauzeit aus dem Archiv und
+prüft, dass sie unverändert im Paket ankommen. Was dafür nötig war und was
+davon geprüft ist: `docs/SD_TOOL_PORTABLE.md`.
 
 ## Felder benennen
 
