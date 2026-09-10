@@ -1,7 +1,12 @@
 # FTC4-Logdateien (*.LOG)
 
-Nachgewiesen an zwei echten Logs vom Gerät (`223619.LOG` vom 09.09.2026 22:36
-und `000047.LOG` vom 10.09.2026 00:00) sowie an `TEST.LOG`.
+Nachgewiesen an **473 echten Logs** eines vollständigen SD-Karten-Abzugs
+(09.09.2026 22:36 bis 10.09.2026 06:26, ein Log je Minute) sowie an `TEST.LOG`.
+
+Bei allen 473 Dateien stimmt die Prüfsumme und deckt sich der Header-Zeitstempel
+auf die Minute mit dem Dateinamen. Von 512 Byte-Offsets verändern sich über den
+gesamten Zeitraum genau 22 — und **jeder davon liegt innerhalb des Feldlayouts**;
+kein belegtes Byte bleibt unzugeordnet.
 
 ## TEST.LOG
 
@@ -29,6 +34,10 @@ FTC4 auf die SD-Karte legt — keine Nutzdaten. Der Decoder erkennt und
 Plain binär, nicht BCD: `1a 09 09 16 24` → `26, 9, 9, 22, 36` → 09.09.2026 22:36.
 Sekunden stehen nicht im Header — die liefert der Dateiname: `223619.LOG` =
 22:36:19. Der Header ist also minutengenau, der Dateiname sekundengenau.
+
+**Mitternacht schreibt die FTC4 als Stunde 24 des Vortags.** `240003.LOG`
+trägt `1a 09 09 18 00` = 09.09.2026 24:00, gemeint ist 10.09.2026 00:00. Ein
+naiver `datetime`-Aufruf scheitert daran; der Decoder normalisiert es.
 
 ### Prüfsumme
 
@@ -75,6 +84,26 @@ Bei den hinteren sechs Records steht im Statusbyte konstant `11` bzw. `2` —
 als Temperatur ergäbe das −34,5 °C / −39,0 °C. Dort ist es also **kein**
 Temperaturbyte, sondern ein Modus- oder Statuscode. Der Decoder gibt das Byte
 deshalb roh aus und bietet die Temperaturlesart nur an, wo sie plausibel ist.
+
+## Beobachteter Verlauf über die Nacht
+
+Aus 473 Logs, rein deskriptiv — keine Feldzuordnung, nur was die Zahlen tun:
+
+| Feld | Offset | 22:36 | 06:26 | Verhalten |
+|------|--------|-------|-------|-----------|
+| `rec03_wert` | `0x06b` | 44,00 °C | 36,50 °C | fällt über die Nacht stetig ab |
+| `vor01` | `0x060` | 20,0 °C | 19,0 °C | fällt langsam |
+| `vor03` | `0x064` | 16,0 °C | 14,0 °C | schwankt zwischen 14 und 16 |
+| `soll07/08/09` | `0x05a/5c/5e` | 22,50 °C | 22,00 °C | alle drei springen gleichzeitig um 01:05 |
+| `soll03` = `rec01_wert` | `0x052` / `0x065` | 28,00 °C | 27,00 °C | tragen **immer** denselben Wert |
+
+Konstant über den gesamten Zeitraum: `0x04e` = 18,00 °C, `0x050` = 20,00 °C,
+`0x054` = 35,00 °C, `0x056` = 43,00 °C, `0x058` = 60,00 °C und die sechs
+Records ab `0x06e` auf je 25,00 °C.
+
+Bemerkenswert: `0x052` und `0x065` sind über alle 473 Logs identisch — das ist
+dieselbe Größe an zwei Stellen. Und `0x06b`/`0x06d` tragen denselben Wert in
+zwei Auflösungen (LE16/100 und Byte/2−40).
 
 ## Was NICHT nachgewiesen ist
 
@@ -140,4 +169,7 @@ Beobachtungen ohne Interpretation:
   sich in den 84 Minuten nicht geändert haben, oder Struktur ohne Nutzdaten.
 - Ob Logs mit anderer Firmware dasselbe Layout haben, ist ungeprüft. Die
   Prüfsummen- und Zeitstempelprüfung schlägt in dem Fall an.
-- Es liegen nur zwei Logs vor. Jede Aussage hier steht auf zwei Stichproben.
+- Die Bedeutung der einzelnen Felder. Der Verlauf oben legt einiges nahe —
+  ein Wert, der über acht Stunden ohne Nachheizung von 44 auf 36,5 °C fällt,
+  verhält sich wie ein Speicherfühler — aber „verhält sich wie" ist kein
+  Nachweis. Dafür braucht es abgelesene Displaywerte.

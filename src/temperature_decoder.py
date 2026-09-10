@@ -21,10 +21,14 @@ kann einfach durchgereicht werden::
     data = analyzer.files["HT_CL.DAT"]
     TemperatureDecoder.extract_setpoints(data)
 
-WICHTIG: Die Byte-Offsets der Sollwerte sind Hypothesen aus der
-Formatanalyse, nicht vom Hersteller bestaetigt. Jeder dekodierte Wert traegt
-deshalb ein ``plausible``-Flag und eine ``confidence``-Angabe. Siehe
-docs/TEMPERATURE_DECODING.md fuer das Validierungsverfahren am echten Geraet.
+Die DAT-Dateien sind aus 3-Byte-Records ``[TYP][HI][LO]`` aufgebaut; die
+Temperaturen stehen im LO-Byte von Records mit Typ 0x0f. Der vollstaendige
+Recordaufbau steckt in :mod:`src.dat_decoder`, das fuer ganze Dateien der
+bessere Einstieg ist. Dieses Modul bleibt die Rechenschicht darunter.
+
+WICHTIG: Welcher Record welchen Sollwert traegt, ist nicht nachgewiesen. Jeder
+dekodierte Wert traegt deshalb ein ``plausible``-Flag und eine
+``confidence``-Angabe. Siehe docs/DAT_FORMAT.md.
 """
 
 from __future__ import annotations
@@ -183,27 +187,34 @@ class TemperatureDecoder:
     #: Erwartete Dateigroesse einer FTC4-DAT-Datei (ein Sektor).
     DAT_FILE_SIZE = 512
 
-    #: Sollwert-Layout von HT_CL.DAT. Offsets stammen aus der Formatanalyse
-    #: (docs/FORMAT.md) und sind noch nicht am Geraet bestaetigt.
-    HT_CL_SETPOINTS: Sequence[SetpointSpec] = (
+    #: Sollwert-Layout von HT&CL.DAT.
+    #:
+    #: An einem echten SD-Karten-Abzug nachgewiesen: die DAT-Dateien bestehen
+    #: aus 3-Byte-Records ``[TYP][HI][LO]``. Ein Record mit Typ 0x0f und HI=0
+    #: traegt im LO-Byte eine Temperatur in 0.5-Grad-Schritten. Die Wertebytes
+    #: liegen also auf Offset ``3 * Recordnummer + 2``.
+    #:
+    #: Die frueher aus den Projektunterlagen uebernommene Annahme, die
+    #: Sollwerte laegen auf Offset 0x02 und 0x04, ist damit **widerlegt**: dort
+    #: stehen die Nullbytes der Records 0 und 1. Die Records 0 und 1 selbst
+    #: tragen 0.0 und 1.0 und sind eher Modus-Flags als Temperaturen; sie
+    #: stehen deshalb nicht in dieser Liste, tauchen aber in der vollstaendigen
+    #: Recordliste von :mod:`src.dat_decoder` auf.
+    #:
+    #: Welcher dieser acht Werte Heizen, Kuehlen oder Warmwasser ist, ist
+    #: weiterhin **nicht** nachgewiesen -- deshalb die neutralen Schluessel.
+    HT_CL_SETPOINTS: Sequence[SetpointSpec] = tuple(
         SetpointSpec(
-            key="heating_setpoint",
-            label="Heiz-Sollwert (Vorlauf)",
-            offset=0x02,
+            key=f"ht_cl_r{record:02d}",
+            label=f"HT&CL Record {record:02d}",
+            offset=3 * record + 2,
             encoding="u8",
-            valid_range=(20.0, 60.0),
-            confidence="hypothesis",
-            note="Offset laut FORMAT.md; Byte-Breite u8 vs. u16le noch offen.",
-        ),
-        SetpointSpec(
-            key="cooling_setpoint",
-            label="Kuehl-Sollwert (Vorlauf)",
-            offset=0x04,
-            encoding="u8",
-            valid_range=(5.0, 30.0),
-            confidence="hypothesis",
-            note="Offset laut FORMAT.md; Byte-Breite u8 vs. u16le noch offen.",
-        ),
+            scale=HALF_STEP,
+            valid_range=(0.0, 90.0),
+            confidence="encoding_confirmed",
+            note="Kodierung belegt, Bedeutung der Position offen",
+        )
+        for record in (2, 3, 4, 5, 6, 10, 11, 12)
     )
 
     # ------------------------------------------------------------------

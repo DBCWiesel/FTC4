@@ -4,11 +4,32 @@ Dekodierung der Mitsubishi-Ecodan-FTC4-Dateien von der SD-Karte:
 Konfiguration (`*.DAT`) und Betriebslogs (`*.LOG`), je 512 Byte.
 
 ```
-src/temperature_decoder.py           DAT-Dateien: 0.5-°C-Schritte, Sollwerte
-src/log_decoder.py                   LOG-Dateien: Klartext-Report, Diff, CSV
-tests/                               136 Tests
-docs/TEMPERATURE_DECODING.md         DAT-Format: Hypothesen und Verifikation
+src/decode_all.py                    ganzer Kartenabzug -> eine Textdatei
+src/dat_decoder.py                   SETTING/*.DAT: Records, Zeitprogramme
+src/log_decoder.py                   LOG/*.LOG: Report, Diff, Zeitreihe
+src/temperature_decoder.py           Rechenschicht: 0,5-°C-Kodierung
+tests/                               195 Tests
+docs/DAT_FORMAT.md                   DAT-Format: Record-Struktur
 docs/LOG_FORMAT.md                   LOG-Format: Aufbau und Feldzuordnung
+docs/TEMPERATURE_DECODING.md         Temperaturkodierungen im Überblick
+```
+
+## Alles auf einmal
+
+```bash
+python3 -m src.decode_all /pfad/zum/kartenabzug -o ftc4.txt --csv reihe.csv
+```
+
+Läuft über `SETTING/` und `LOG/` und schreibt einen zusammenhängenden
+Klartext-Report: Konfiguration Record für Record, Logs als Zeitreihe mit
+veränderlichen und konstanten Feldern, plus erstes und letztes Log im Detail.
+
+## Konfigurationsdateien lesen
+
+```bash
+python3 -m src.dat_decoder data                 # alle DAT-Dateien
+python3 -m src.dat_decoder data/HT\&CL.DAT --alle
+python3 -m src.dat_decoder data --json
 ```
 
 ## Logdateien lesen
@@ -79,18 +100,18 @@ Tests gegen echte Gerätedaten (`TestAgainstRealDeviceData`,
 
 | Aussage | Status |
 |---------|--------|
-| LOG: Prüfsumme, Summe aller 512 Byte = 0 mod 256 | bestätigt an 2 Dateien |
-| LOG: Zeitstempel `YY MM DD HH MM` auf 0x00 | bestätigt |
+| Prüfsumme: Summe aller 512 Byte = 0 mod 256, in DAT **und** LOG | bestätigt an 484 Dateien |
+| DAT: 3-Byte-Records `[TYP][HI][LO]` | bestätigt, 11/11 Dateien |
+| DAT: Typ `0f` mit HI=0 = Einzelwert; in HT&CL.DAT °C in 0,5-Schritten | bestätigt gegen Gerätewerte |
+| DAT: `ff ff` = nicht belegter Eintrag | bestätigt |
+| DAT: 35 Zeitfenster je SCH-Datei = 7 Tage × 5 | bestätigt |
+| LOG: Zeitstempel `YY MM DD HH MM`, Mitternacht als Stunde 24 | bestätigt an 473 Logs |
 | LOG: `LE16/100` und `Byte/2−40` als Temperatur | bestätigt |
-| LOG: Bedeutung der einzelnen Felder | **offen** |
-| DAT: `celsius = raw * 0.5` | bestätigt für 0x4c/0x64/0x5a |
-| Heiz-Sollwert auf Offset `0x02` | **Hypothese** |
-| Kühl-Sollwert auf Offset `0x04` | **Hypothese** |
-| Byte-Breite `u8` vs. `u16le` | **offen** |
-| Prüfsumme über die Datei | nicht untersucht |
+| Sollwerte in HT&CL.DAT auf Offset `0x02`/`0x04` | **widerlegt** |
+| Bedeutung der einzelnen Records und Log-Felder | **offen** |
+| Kodierung der Typ-`06`-Zeitfenster | **offen** |
 
-Details und Verifikationsverfahren: `docs/TEMPERATURE_DECODING.md` (DAT) und
-`docs/LOG_FORMAT.md` (LOG).
+Details und Verifikationsverfahren: `docs/DAT_FORMAT.md` und `docs/LOG_FORMAT.md`.
 
 Die DAT- und LOG-Dateien selbst sind über `.gitignore` vom Repository
 ausgeschlossen — sie gehören lokal nach `data/` bzw. `data/logs/`.

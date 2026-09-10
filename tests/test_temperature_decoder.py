@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import SYNTHETIC_COOLING_RAW, SYNTHETIC_HEATING_RAW
 from src.temperature_decoder import (
     HALF_STEP,
     Setpoint,
@@ -120,7 +119,7 @@ class TestReadRaw:
     """Rohzugriff auf den Byte-Puffer."""
 
     def test_read_u8(self, synthetic_ht_cl):
-        assert TemperatureDecoder.read_raw(synthetic_ht_cl, 0x02, "u8") == SYNTHETIC_HEATING_RAW
+        assert TemperatureDecoder.read_raw(synthetic_ht_cl, 0x08, "u8") == 0x4C
 
     def test_read_u16le_is_little_endian(self):
         assert TemperatureDecoder.read_raw(b"\x00\x00\x64\x01", 0x02, "u16le") == 0x0164
@@ -130,7 +129,7 @@ class TestReadRaw:
         assert TemperatureDecoder.read_raw(b"\xf6", 0x00, "s8") == -10
 
     def test_decode_at_applies_scale(self, synthetic_ht_cl):
-        assert TemperatureDecoder.decode_at(synthetic_ht_cl, 0x02) == 45.0
+        assert TemperatureDecoder.decode_at(synthetic_ht_cl, 0x08) == 38.0
 
     def test_decode_at_signed_negative_celsius(self):
         assert TemperatureDecoder.decode_at(b"\xf6", 0x00, "s8") == -5.0
@@ -145,50 +144,70 @@ class TestReadRaw:
 
 
 class TestExtractSetpoints:
-    """Sollwert-Extraktion aus HT_CL.DAT."""
+    """Sollwert-Extraktion aus HT&CL.DAT.
 
-    def test_returns_expected_keys(self, synthetic_ht_cl):
+    Die Temperaturen stehen im LO-Byte der Typ-0x0f-Records, also auf
+    Offset ``3 * Recordnummer + 2``.
+    """
+
+    def test_returns_dict_of_setpoints(self, synthetic_ht_cl):
         temps = TemperatureDecoder.extract_setpoints(synthetic_ht_cl)
         assert isinstance(temps, dict)
-        assert "heating_setpoint" in temps
-        assert "cooling_setpoint" in temps
+        assert set(temps) == {f"ht_cl_r{n:02d}" for n in (2, 3, 4, 5, 6, 10, 11, 12)}
 
-    def test_decodes_documented_offsets(self, synthetic_ht_cl):
-        """Offset 0x02 = Heizen, 0x04 = Kuehlen (Hypothese aus FORMAT.md)."""
+    def test_decodes_the_device_reference_values(self, synthetic_ht_cl):
+        """Die drei am Geraet abgelesenen Werte muessen herauskommen."""
         temps = TemperatureDecoder.extract_setpoints(synthetic_ht_cl)
-        assert temps["heating_setpoint"] == SYNTHETIC_HEATING_RAW * HALF_STEP
-        assert temps["cooling_setpoint"] == SYNTHETIC_COOLING_RAW * HALF_STEP
+        assert temps["ht_cl_r02"] == 38.0   # 0x4c
+        assert temps["ht_cl_r03"] == 50.0   # 0x64
+        assert temps["ht_cl_r04"] == 45.0   # 0x5a
+
+    def test_decodes_all_eight_setpoints(self, synthetic_ht_cl):
+        assert sorted(TemperatureDecoder.extract_setpoints(synthetic_ht_cl).values()) == [
+            35.0, 38.0, 40.0, 45.0, 45.0, 50.0, 55.0, 55.0
+        ]
+
+    def test_old_offsets_0x02_0x04_are_disproven(self, synthetic_ht_cl):
+        """Die fruehere Annahme aus den Projektunterlagen ist widerlegt.
+
+        Auf 0x02 und 0x04 stehen die Nullbytes der Records 0 und 1, nicht die
+        Sollwerte. Der Test haelt fest, warum das Layout geaendert wurde.
+        """
+        assert synthetic_ht_cl[0x02] == 0x00
+        assert synthetic_ht_cl[0x04] == 0x00
+        alt = TemperatureDecoder.extract_setpoints(
+            synthetic_ht_cl,
+            [SetpointSpec("heating_setpoint", "alt", 0x02, valid_range=(20.0, 60.0))],
+        )
+        assert alt["heating_setpoint"] == 0.0
 
     def test_detailed_carries_provenance(self, synthetic_ht_cl):
         detailed = TemperatureDecoder.extract_setpoints_detailed(synthetic_ht_cl)
-        heating = detailed["heating_setpoint"]
-        assert isinstance(heating, Setpoint)
-        assert heating.offset == 0x02
-        assert heating.raw == SYNTHETIC_HEATING_RAW
-        assert heating.celsius == 45.0
-        assert heating.hex == "5a"
-        assert heating.plausible is True
-        assert heating.confidence == "hypothesis"
+        first = detailed["ht_cl_r02"]
+        assert isinstance(first, Setpoint)
+        assert first.offset == 0x08
+        assert first.raw == 0x4C
+        assert first.celsius == 38.0
+        assert first.hex == "4c"
+        assert first.plausible is True
+        assert first.confidence == "encoding_confirmed"
 
     def test_detailed_offers_alternative_readings(self, synthetic_ht_cl):
-        """Solange die Byte-Breite offen ist, muessen beide Lesarten sichtbar sein."""
-        heating = TemperatureDecoder.extract_setpoints_detailed(synthetic_ht_cl)["heating_setpoint"]
-        assert "u16le" in heating.alternatives
-        # 0x02 = 5a, 0x03 = 00 -> u16le liefert denselben Wert wie u8
-        assert heating.alternatives["u16le"] == 45.0
+        first = TemperatureDecoder.extract_setpoints_detailed(synthetic_ht_cl)["ht_cl_r02"]
+        assert "u16le" in first.alternatives
+        assert "s8" in first.alternatives
 
     def test_as_dict_is_json_friendly(self, synthetic_ht_cl):
         import json
 
         detailed = TemperatureDecoder.extract_setpoints_detailed(synthetic_ht_cl)
         payload = {key: sp.as_dict() for key, sp in detailed.items()}
-        assert json.loads(json.dumps(payload))["heating_setpoint"]["offset"] == "0x02"
+        assert json.loads(json.dumps(payload))["ht_cl_r02"]["offset"] == "0x08"
 
     def test_short_buffer_yields_none(self):
         """Zu kurze Daten duerfen nicht knallen, sondern None liefern."""
-        temps = TemperatureDecoder.extract_setpoints(b"\x01\x00\x5a")
-        assert temps["heating_setpoint"] == 45.0
-        assert temps["cooling_setpoint"] is None
+        temps = TemperatureDecoder.extract_setpoints(bytes([0x0F, 0x00, 0x00] * 2 + [0x0F, 0x00]))
+        assert temps["ht_cl_r02"] is None
 
     def test_rejects_non_bytes(self):
         with pytest.raises(TemperatureDecodeError, match="bytes"):
@@ -196,18 +215,18 @@ class TestExtractSetpoints:
 
     def test_accepts_bytearray(self, synthetic_ht_cl):
         temps = TemperatureDecoder.extract_setpoints(bytearray(synthetic_ht_cl))
-        assert temps["heating_setpoint"] == 45.0
+        assert temps["ht_cl_r02"] == 38.0
 
     def test_custom_specs_override_layout(self, synthetic_ht_cl):
-        spec = SetpointSpec(key="dhw_setpoint", label="Warmwasser", offset=0x08)
+        spec = SetpointSpec(key="dhw_setpoint", label="Warmwasser", offset=0x0B)
         temps = TemperatureDecoder.extract_setpoints(synthetic_ht_cl, [spec])
-        assert temps == {"dhw_setpoint": 0x38 * HALF_STEP}
+        assert temps == {"dhw_setpoint": 50.0}
 
     def test_with_offsets_patches_known_key(self, synthetic_ht_cl):
-        specs = TemperatureDecoder.with_offsets(heating_setpoint=0x08)
+        specs = TemperatureDecoder.with_offsets(ht_cl_r02=0x0B)
         temps = TemperatureDecoder.extract_setpoints(synthetic_ht_cl, specs)
-        assert temps["heating_setpoint"] == 0x38 * HALF_STEP
-        assert temps["cooling_setpoint"] == SYNTHETIC_COOLING_RAW * HALF_STEP
+        assert temps["ht_cl_r02"] == 50.0
+        assert temps["ht_cl_r03"] == 50.0
 
     def test_with_offsets_rejects_unknown_key(self):
         with pytest.raises(TemperatureDecodeError, match="Unbekannte Sollwert-Schluessel"):
@@ -257,17 +276,16 @@ class TestValidation:
         assert report["ok"] is True
         assert report["issues"] == []
 
-    def test_validate_setpoints_flags_implausible(self):
-        """Ein 0xff auf dem Heiz-Offset (127.5 C) muss als unplausibel auffallen."""
-        data = bytearray(TemperatureDecoder.DAT_FILE_SIZE)
-        data[0x02] = 0xFF
-        data[0x04] = SYNTHETIC_COOLING_RAW
+    def test_validate_setpoints_flags_implausible(self, synthetic_ht_cl):
+        """Ein 0xff im Wertebyte (127.5 C) muss als unplausibel auffallen."""
+        data = bytearray(synthetic_ht_cl)
+        data[0x08] = 0xFF
         report = TemperatureDecoder.validate_setpoints(bytes(data))
         assert report["ok"] is False
-        assert any("heating_setpoint" in issue for issue in report["issues"])
+        assert any("ht_cl_r02" in issue for issue in report["issues"])
 
     def test_validate_setpoints_flags_missing_offset(self):
-        report = TemperatureDecoder.validate_setpoints(b"\x00\x00\x5a")
+        report = TemperatureDecoder.validate_setpoints(b"\x0f\x00\x00")
         assert report["ok"] is False
         assert any("ausserhalb der Datei" in issue for issue in report["issues"])
 
@@ -280,8 +298,8 @@ class TestFindTemperatureCandidates:
             candidate.offset: candidate.celsius
             for candidate in TemperatureDecoder.find_temperature_candidates(synthetic_ht_cl)
         }
-        assert found[0x02] == 45.0
-        assert 0x08 in found  # 0x38 -> 28.0 C
+        assert found[0x08] == 38.0    # 0x4c, Record 2
+        assert found[0x0B] == 50.0    # 0x64, Record 3
 
     def test_skips_padding(self, synthetic_ht_cl):
         candidates = TemperatureDecoder.find_temperature_candidates(synthetic_ht_cl)
@@ -289,9 +307,9 @@ class TestFindTemperatureCandidates:
 
     def test_range_filter(self, synthetic_ht_cl):
         candidates = TemperatureDecoder.find_temperature_candidates(
-            synthetic_ht_cl, valid_range=(40.0, 50.0)
+            synthetic_ht_cl, valid_range=(49.0, 51.0)
         )
-        assert [candidate.offset for candidate in candidates] == [0x02]
+        assert [candidate.offset for candidate in candidates] == [0x0B]
 
     def test_step_two_scans_word_grid(self, synthetic_ht_cl):
         candidates = TemperatureDecoder.find_temperature_candidates(synthetic_ht_cl, step=2)
@@ -315,7 +333,7 @@ class TestFileLevel:
         assert report["filename"] == "HT_CL.DAT"
         assert report["size"] == 512
         assert report["size_ok"] is True
-        assert report["setpoints"]["heating_setpoint"]["celsius"] == 45.0
+        assert report["setpoints"]["ht_cl_r02"]["celsius"] == 38.0
 
     def test_decode_file_flags_wrong_size(self, tmp_path):
         path = tmp_path / "HT_CL.DAT"

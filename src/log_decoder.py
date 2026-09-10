@@ -288,12 +288,20 @@ class FTC4Log:
 
         ``None``, wenn die Bytes kein gueltiges Datum ergeben. Sekunden stehen
         nicht im Header -- die liefert der Dateiname (``223619.LOG``).
+
+        Mitternacht schreibt die FTC4 als Stunde 24 des Vortags
+        (``240003.LOG`` traegt ``1a 09 09 18 00`` = 09.09. 24:00). Das wird auf
+        00:00 des Folgetags normalisiert.
         """
         year, month, day, hour, minute = self.data[0:5]
+        rollover = hour == 24
+        if rollover:
+            hour = 0
         try:
-            return dt.datetime(2000 + year, month, day, hour, minute)
+            stamp = dt.datetime(2000 + year, month, day, hour, minute)
         except ValueError:
             return None
+        return stamp + dt.timedelta(days=1) if rollover else stamp
 
     @property
     def timestamp_from_filename(self) -> Optional[dt.time]:
@@ -301,8 +309,11 @@ class FTC4Log:
         stem = Path(self.filename).stem
         if len(stem) != 6 or not stem.isdigit():
             return None
+        hour = int(stem[0:2])
+        if hour == 24:  # Mitternacht, siehe :attr:`timestamp`
+            hour = 0
         try:
-            return dt.time(int(stem[0:2]), int(stem[2:4]), int(stem[4:6]))
+            return dt.time(hour, int(stem[2:4]), int(stem[4:6]))
         except ValueError:
             return None
 
