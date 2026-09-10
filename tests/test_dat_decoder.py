@@ -93,19 +93,24 @@ class TestTemperatureRecords:
     """Typ 0x0f mit HI=0: LO * 0.5 Grad -- an den Geraete-Referenzwerten belegt."""
 
     def test_reference_values(self, synthetic_ht_cl):
+        """Gegen die Ausgabe des Hersteller-Werkzeugs: LO/2-20."""
         temps = [r.celsius for r in FTC4DatFile(synthetic_ht_cl).temperatures()]
-        assert 38.0 in temps   # 0x4c
-        assert 50.0 in temps   # 0x64
-        assert 45.0 in temps   # 0x5a
+        assert 18.0 in temps   # 0x4c
+        assert 30.0 in temps   # 0x64
+        assert 25.0 in temps   # 0x5a
 
     def test_all_setpoints(self, synthetic_ht_cl):
         dat = FTC4DatFile(synthetic_ht_cl)
-        found = sorted(r.celsius for r in dat.temperatures() if r.celsius >= 35.0)
-        assert found == [35.0, 38.0, 40.0, 45.0, 45.0, 50.0, 55.0, 55.0]
+        found = sorted(r.celsius for r in dat.temperatures() if r.celsius >= 15.0)
+        assert found == [15.0, 18.0, 20.0, 25.0, 25.0, 30.0, 35.0, 35.0]
 
-    @pytest.mark.parametrize("lo, celsius", [(0, 0.0), (2, 1.0), (0x4C, 38.0), (0xFE, 127.0)])
-    def test_scale(self, lo, celsius):
+    @pytest.mark.parametrize("lo, celsius", [(40, 0.0), (76, 18.0), (100, 30.0), (254, 107.0)])
+    def test_setpoint_scale(self, lo, celsius):
         assert DatRecord(0, 0, TYPE_TEMPERATURE, 0x00, lo).celsius == celsius
+
+    @pytest.mark.parametrize("lo, celsius", [(80, 0.0), (90, 5.0), (50, -15.0), (0, -40.0)])
+    def test_outdoor_scale(self, lo, celsius):
+        assert DatRecord(0, 0, TYPE_TEMPERATURE, 0x00, lo).outdoor_celsius == celsius
 
     def test_unset_record_is_not_a_temperature(self):
         record = DatRecord(0, 0, TYPE_TEMPERATURE, 0xFF, 0xFF)
@@ -208,7 +213,7 @@ class TestTextReport:
         assert "Heizen und Kuehlen" in text
         assert "Pruefsumme      : OK" in text
         assert "16 Records" in text
-        assert "38.0 C" in text
+        assert "18.0 C" in text
 
     def test_warns_about_broken_checksum(self, synthetic_ht_cl):
         broken = bytearray(synthetic_ht_cl)
@@ -286,7 +291,7 @@ class TestAgainstRealDatFiles:
             if "HT" not in path.name.upper():
                 continue
             temps = {r.celsius for r in FTC4DatFile.from_path(path).temperatures()}
-            assert {38.0, 50.0, 45.0} <= temps, f"{path.name}: {sorted(temps)}"
+            assert {18.0, 30.0, 25.0} <= temps, f"{path.name}: {sorted(temps)}"
 
     def test_single_values_are_not_all_temperatures(self, real_dat_files):
         """Typ 0x0f ist ein Einzelwert, keine Temperaturzusicherung.

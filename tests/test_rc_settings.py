@@ -49,19 +49,20 @@ class TestDecode:
 
     def test_bcd_wins_when_only_it_fits(self):
         dat = FTC4DatFile(build_dat([(0x03, 0x01, 0x50)]))
-        entry = decode_file([item(0x000, minimum=10, maximum=30)], dat)[0]
+        entry = decode_file([item(0x000, minimum=14, maximum=16)], dat)[0]
         assert entry.value == 15.0
         assert entry.status == "eindeutig"
 
-    def test_half_degree_wins_for_flow_temperature(self):
+    def test_setpoint_encoding_wins_for_flow_temperature(self):
+        """LO 100 sind 30 C -- gegen das Hersteller-Werkzeug geprueft."""
         dat = FTC4DatFile(build_dat([(0x0F, 0x00, 0x64)]))
         entry = decode_file([item(0x000, minimum=25, maximum=60)], dat)[0]
-        assert entry.value == 50.0
+        assert entry.value == 30.0
 
     def test_offset_encoding_wins_for_outdoor_temperature(self):
         """LO 50 ist -15 C, wenn der Bereich Minusgrade zulaesst."""
         dat = FTC4DatFile(build_dat([(0x0F, 0x00, 50)]))
-        entry = decode_file([item(0x000, minimum=-15, maximum=10)], dat)[0]
+        entry = decode_file([item(0x000, minimum=-16, maximum=-14)], dat)[0]
         assert entry.value == -15.0
 
     def test_ambiguous_readings_are_all_reported(self):
@@ -74,9 +75,9 @@ class TestDecode:
     def test_no_fitting_reading_keeps_all_variants(self):
         """Passt nichts, muessen die Lesarten trotzdem sichtbar bleiben."""
         dat = FTC4DatFile(build_dat([(0x0F, 0x00, 126)]))
-        entry = decode_file([item(0x000, minimum=40, maximum=60)], dat)[0]
+        entry = decode_file([item(0x000, minimum=90, maximum=99)], dat)[0]
         assert entry.readings == {}
-        assert entry.all_readings["Halbgrad"] == 63.0
+        assert entry.all_readings["Sollwert (/2-20)"] == 43.0
         assert entry.status == "keine Lesart im erlaubten Bereich"
 
     def test_time_record(self):
@@ -99,7 +100,7 @@ class TestDecode:
         dat = FTC4DatFile(build_dat([(0x02, 0x89, 0x25)]))
         entry = decode_file([item(0x000, minimum=25, maximum=60)], dat)[0]
         assert "LO Rohwert" in entry.all_readings
-        assert "HI Halbgrad -40" in entry.all_readings
+        assert "HI Aussen (/2-40)" in entry.all_readings
 
     def test_missing_record_is_reported(self):
         dat = FTC4DatFile(build_dat([(0x0F, 0x00, 0x01)]))
@@ -112,7 +113,7 @@ class TestReport:
     def test_renders_values_and_source_note(self):
         dat = FTC4DatFile(build_dat([(0x03, 0x01, 0x50)]))
         text = render_text(decode_file([item(0x000, title="Raumtemperatur",
-                                             minimum=10, maximum=30)], dat), "HOL.DAT")
+                                             minimum=14, maximum=16)], dat), "HOL.DAT")
         assert "HOL.DAT" in text
         assert "Raumtemperatur" in text
         assert "15 C" in text

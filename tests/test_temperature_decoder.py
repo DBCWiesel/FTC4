@@ -19,20 +19,39 @@ from src.temperature_decoder import (
 )
 
 
-class TestDecodeHalfDegreeSteps:
-    """0.5-Grad-Schritte: raw * 0.5 = Grad Celsius."""
+class TestDecodeSetpoint:
+    """Sollwert-Temperaturen: raw / 2 - 20.
 
-    def test_decode_38_celsius(self):
-        """0x4c (76) muss 38 C ergeben -- am Geraet abgelesen."""
+    Gegen die Ausgabe des Hersteller-Werkzeugs auf denselben Dateien geprueft.
+    Die Projektunterlagen fuehrten fuer dieselben Rohwerte 38, 50 und 45 C --
+    durchgehend 20 K zu hoch, weil dort der Nullpunkt fehlte.
+    """
+
+    def test_decode_18_celsius(self):
+        """0x4c (76) ergibt 18 C, nicht die 38 C aus den Unterlagen."""
+        assert TemperatureDecoder.decode_setpoint(0x4C) == 18.0
+
+    def test_decode_30_celsius(self):
+        assert TemperatureDecoder.decode_setpoint(0x64) == 30.0
+
+    def test_decode_25_celsius(self):
+        assert TemperatureDecoder.decode_setpoint(0x5A) == 25.0
+
+    def test_outdoor_uses_deeper_zero_point(self):
+        """Aussentemperaturen brauchen Minusgrade: raw / 2 - 40."""
+        assert TemperatureDecoder.decode_outdoor(90) == 5.0
+        assert TemperatureDecoder.decode_outdoor(50) == -15.0
+        assert TemperatureDecoder.decode_outdoor(0) == -40.0
+
+    def test_scaling_primitive_has_no_zero_point(self):
+        """decode_0_5_degree_steps ist die Rechenschicht, keine Temperatur."""
         assert TemperatureDecoder.decode_0_5_degree_steps(0x4C) == 38.0
+        assert TemperatureDecoder.decode_setpoint(0x4C) == 18.0
 
-    def test_decode_50_celsius(self):
-        """0x64 (100) muss 50 C ergeben -- am Geraet abgelesen."""
-        assert TemperatureDecoder.decode_0_5_degree_steps(0x64) == 50.0
-
-    def test_decode_45_celsius(self):
-        """0x5a (90) muss 45 C ergeben -- am Geraet abgelesen."""
-        assert TemperatureDecoder.decode_0_5_degree_steps(0x5A) == 45.0
+    def test_setpoint_roundtrip(self):
+        for raw in range(256):
+            assert TemperatureDecoder.encode_setpoint(
+                TemperatureDecoder.decode_setpoint(raw)) == raw
 
     @pytest.mark.parametrize(
         "raw, expected",
@@ -62,9 +81,9 @@ class TestDecodeHalfDegreeSteps:
 class TestEncode:
     """Rueckkonvertierung Grad Celsius -> Rohbytes."""
 
-    @pytest.mark.parametrize("celsius, raw", [(38.0, 0x4C), (50.0, 0x64), (45.0, 0x5A)])
+    @pytest.mark.parametrize("celsius, raw", [(18.0, 0x4C), (30.0, 0x64), (25.0, 0x5A)])
     def test_encode_known_values(self, celsius, raw):
-        assert TemperatureDecoder.encode_0_5_degree_steps(celsius) == raw
+        assert TemperatureDecoder.encode_setpoint(celsius) == raw
 
     def test_roundtrip_over_full_byte_range(self):
         """Jeder Rohwert 0..255 muss den Hin- und Rueckweg unveraendert ueberstehen."""
@@ -130,6 +149,7 @@ class TestReadRaw:
 
     def test_decode_at_applies_scale(self, synthetic_ht_cl):
         assert TemperatureDecoder.decode_at(synthetic_ht_cl, 0x08) == 38.0
+        assert TemperatureDecoder.decode_at(synthetic_ht_cl, 0x08, bias=-20.0) == 18.0
 
     def test_decode_at_signed_negative_celsius(self):
         assert TemperatureDecoder.decode_at(b"\xf6", 0x00, "s8") == -5.0
@@ -155,16 +175,16 @@ class TestExtractSetpoints:
         assert isinstance(temps, dict)
         assert set(temps) == {f"ht_cl_r{n:02d}" for n in (2, 3, 4, 5, 6, 10, 11, 12)}
 
-    def test_decodes_the_device_reference_values(self, synthetic_ht_cl):
-        """Die drei am Geraet abgelesenen Werte muessen herauskommen."""
+    def test_decodes_the_vendor_reference_values(self, synthetic_ht_cl):
+        """Die vom Hersteller-Werkzeug ausgegebenen Werte muessen herauskommen."""
         temps = TemperatureDecoder.extract_setpoints(synthetic_ht_cl)
-        assert temps["ht_cl_r02"] == 38.0   # 0x4c
-        assert temps["ht_cl_r03"] == 50.0   # 0x64
-        assert temps["ht_cl_r04"] == 45.0   # 0x5a
+        assert temps["ht_cl_r02"] == 18.0   # 0x4c
+        assert temps["ht_cl_r03"] == 30.0   # 0x64
+        assert temps["ht_cl_r04"] == 25.0   # 0x5a
 
     def test_decodes_all_eight_setpoints(self, synthetic_ht_cl):
         assert sorted(TemperatureDecoder.extract_setpoints(synthetic_ht_cl).values()) == [
-            35.0, 38.0, 40.0, 45.0, 45.0, 50.0, 55.0, 55.0
+            15.0, 18.0, 20.0, 25.0, 25.0, 30.0, 35.0, 35.0
         ]
 
     def test_old_offsets_0x02_0x04_are_disproven(self, synthetic_ht_cl):
@@ -187,10 +207,10 @@ class TestExtractSetpoints:
         assert isinstance(first, Setpoint)
         assert first.offset == 0x08
         assert first.raw == 0x4C
-        assert first.celsius == 38.0
+        assert first.celsius == 18.0
         assert first.hex == "4c"
         assert first.plausible is True
-        assert first.confidence == "encoding_confirmed"
+        assert first.confidence == "bestaetigt"
 
     def test_detailed_offers_alternative_readings(self, synthetic_ht_cl):
         first = TemperatureDecoder.extract_setpoints_detailed(synthetic_ht_cl)["ht_cl_r02"]
@@ -215,18 +235,19 @@ class TestExtractSetpoints:
 
     def test_accepts_bytearray(self, synthetic_ht_cl):
         temps = TemperatureDecoder.extract_setpoints(bytearray(synthetic_ht_cl))
-        assert temps["ht_cl_r02"] == 38.0
+        assert temps["ht_cl_r02"] == 18.0
 
     def test_custom_specs_override_layout(self, synthetic_ht_cl):
-        spec = SetpointSpec(key="dhw_setpoint", label="Warmwasser", offset=0x0B)
+        spec = SetpointSpec(key="dhw_setpoint", label="Warmwasser", offset=0x0B,
+                            bias=-20.0)
         temps = TemperatureDecoder.extract_setpoints(synthetic_ht_cl, [spec])
-        assert temps == {"dhw_setpoint": 50.0}
+        assert temps == {"dhw_setpoint": 30.0}
 
     def test_with_offsets_patches_known_key(self, synthetic_ht_cl):
         specs = TemperatureDecoder.with_offsets(ht_cl_r02=0x0B)
         temps = TemperatureDecoder.extract_setpoints(synthetic_ht_cl, specs)
-        assert temps["ht_cl_r02"] == 50.0
-        assert temps["ht_cl_r03"] == 50.0
+        assert temps["ht_cl_r02"] == 30.0
+        assert temps["ht_cl_r03"] == 30.0
 
     def test_with_offsets_rejects_unknown_key(self):
         with pytest.raises(TemperatureDecodeError, match="Unbekannte Sollwert-Schluessel"):
@@ -263,8 +284,8 @@ class TestValidation:
         assert all(check["match"] for check in report["checks"])
         assert all(check["roundtrip_ok"] for check in report["checks"])
 
-    def test_known_values_cover_documented_references(self):
-        assert TemperatureDecoder.KNOWN_VALUES == {0x4C: 38.0, 0x64: 50.0, 0x5A: 45.0}
+    def test_known_values_match_the_vendor_tool(self):
+        assert TemperatureDecoder.KNOWN_VALUES == {0x4C: 18.0, 0x64: 30.0, 0x5A: 25.0}
 
     def test_plausible_range_is_inclusive(self):
         assert TemperatureDecoder.is_plausible(20.0, (20.0, 60.0)) is True
@@ -298,8 +319,8 @@ class TestFindTemperatureCandidates:
             candidate.offset: candidate.celsius
             for candidate in TemperatureDecoder.find_temperature_candidates(synthetic_ht_cl)
         }
-        assert found[0x08] == 38.0    # 0x4c, Record 2
-        assert found[0x0B] == 50.0    # 0x64, Record 3
+        assert found[0x08] == 38.0    # Rohskalierung ohne Nullpunkt
+        assert found[0x0B] == 50.0
 
     def test_skips_padding(self, synthetic_ht_cl):
         candidates = TemperatureDecoder.find_temperature_candidates(synthetic_ht_cl)
@@ -333,7 +354,7 @@ class TestFileLevel:
         assert report["filename"] == "HT_CL.DAT"
         assert report["size"] == 512
         assert report["size_ok"] is True
-        assert report["setpoints"]["ht_cl_r02"]["celsius"] == 38.0
+        assert report["setpoints"]["ht_cl_r02"]["celsius"] == 18.0
 
     def test_decode_file_flags_wrong_size(self, tmp_path):
         path = tmp_path / "HT_CL.DAT"
@@ -342,7 +363,7 @@ class TestFileLevel:
 
     def test_main_without_arguments_validates_only(self, capsys):
         assert main([]) == 0
-        assert "38.0 C" in capsys.readouterr().out
+        assert "18.0 C" in capsys.readouterr().out
 
     def test_main_reports_file(self, tmp_path, synthetic_ht_cl, capsys):
         path = tmp_path / "HT_CL.DAT"
@@ -353,6 +374,12 @@ class TestFileLevel:
     def test_main_handles_missing_file(self, tmp_path, capsys):
         assert main([str(tmp_path / "fehlt.DAT")]) == 1
         assert "nicht lesen" in capsys.readouterr().out
+
+
+def setpoint_bias(setpoint):
+    """Nullpunkt, mit dem ein Sollwert kodiert wurde."""
+    from src.temperature_decoder import SETPOINT_BIAS
+    return SETPOINT_BIAS
 
 
 class TestAgainstRealDeviceData:
@@ -380,6 +407,7 @@ class TestAgainstRealDeviceData:
         for setpoint in detailed.values():
             if setpoint is None:
                 continue
-            reencoded = TemperatureDecoder.encode_to_bytes(setpoint.celsius, setpoint.encoding)
+            reencoded = TemperatureDecoder.encode_to_bytes(
+                setpoint.celsius, setpoint.encoding, bias=setpoint_bias(setpoint))
             original = real_ht_cl[setpoint.offset : setpoint.offset + len(reencoded)]
             assert reencoded == original, f"Roundtrip fehlgeschlagen fuer {setpoint.key}"

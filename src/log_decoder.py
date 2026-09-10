@@ -223,10 +223,14 @@ OBSERVED: Dict[int, str] = {
     0x06D: "trug durchgehend denselben Wert wie 0x06b",
 }
 
-#: Offsets, deren Byte nachweislich eine Temperatur traegt (Byte/2-40).
-#: Die Statusbytes der hinteren Records fuehren dagegen kleine Codes (2, 11),
-#: die als Temperatur keinen Sinn ergeben.
-TEMPERATURE_BYTES = frozenset({0x060, 0x063, 0x067, 0x06A, 0x06D})
+#: Offsets, deren Byte das Hersteller-Werkzeug selbst als Temperatur ausgibt.
+#:
+#: Nur die Aussentemperatur. Die uebrigen Einzelbytes -- 0x060, 0x063, 0x067,
+#: 0x06a, 0x06d -- exportiert das Werkzeug **roh**, obwohl sie als Byte/2-40
+#: durchaus plausible Temperaturen ergeben (0x06d liefert so exakt die
+#: Speichertemperatur von nebenan). Der Decoder haelt sich an die Referenz und
+#: gibt sie roh aus; die Temperaturlesart steht als Anmerkung daneben.
+TEMPERATURE_BYTES = frozenset({0x064})
 
 #: Die digitalen Eingaenge sind Schaltzustaende, keine Messwerte.
 INPUT_BYTES = frozenset(range(0x080, 0x087))
@@ -284,12 +288,16 @@ def _build_layout() -> Tuple[FieldSpec, ...]:
                       group="sollwerte", label=label, confidence=confidence, note=note)
         )
 
+    # Einzelbytes werden nur dort als Temperatur gelesen, wo das
+    # Hersteller-Werkzeug es auch tut -- sonst roh, wie in der Referenz.
     for key, offset, encoding, fallback in (
-        ("vor01", 0x60, TEMP_HALF40, "Einzelwert 0x60"),
+        ("vor01", 0x60, None, "Einzelwert 0x60"),
         ("vor02_wert", 0x61, TEMP_CENTI, "Einzelwert 0x61"),
-        ("vor02_status", 0x63, TEMP_HALF40, "Folgebyte 0x63"),
-        ("vor03", 0x64, TEMP_HALF40, "Einzelwert 0x64"),
+        ("vor02_status", 0x63, None, "Folgebyte 0x63"),
+        ("vor03", 0x64, None, "Einzelwert 0x64"),
     ):
+        if encoding is None:
+            encoding = TEMP_HALF40 if offset in TEMPERATURE_BYTES else RAW_U8
         label, confidence, note = _annotate(offset, fallback)
         specs.append(
             FieldSpec(offset=offset, key=key, encoding=encoding, group="messwerte",

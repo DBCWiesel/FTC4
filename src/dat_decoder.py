@@ -16,14 +16,19 @@ SD-Karten-Abzug nachgewiesen (11 von 11 Dateien):
 Beobachtete Typbytes: 0x01..0x09 und 0x0f. Sicher gedeutet ist bisher:
 
 ``0x0f`` mit ``HI == 0``
-    Ein Einzelwert-Parameter: die Nutzlast steckt allein im LO-Byte.
-    In HT&CL.DAT sind diese Werte Temperaturen in 0.5-Grad-Schritten -- dort
-    stehen die drei am Geraet abgelesenen Referenzwerte als Records:
-    ``0f 00 4c`` = 38.0 C, ``0f 00 64`` = 50.0 C, ``0f 00 5a`` = 45.0 C.
-    Der Typ ist aber **nicht** auf Temperaturen festgelegt: SER_1.DAT enthaelt
-    Typ-0x0f-Records mit LO bis 230, was als Temperatur (115 C) keinen Sinn
-    ergibt. Der Decoder gibt deshalb immer den Rohwert aus und die
-    Temperaturlesart nur als gekennzeichneten Zusatz.
+    Ein Einzelwert-Parameter: die Nutzlast steckt allein im LO-Byte. Wie er zu
+    lesen ist, haengt vom Parameter ab -- gegen die Ausgabe des
+    Hersteller-Werkzeugs auf denselben Dateien geprueft:
+
+    * Sollwert-Temperaturen (Raum, Vorlauf, Warmwasser): ``LO / 2 - 20``.
+      ``0f 00 4c`` sind 18.0 C, ``0f 00 7e`` sind 43.0 C.
+    * Aussentemperaturen: ``LO / 2 - 40``. Der tiefere Nullpunkt deckt
+      Minusgrade ab.
+    * Zaehler, Minuten, Auswahlwerte: ``LO`` direkt.
+
+    Der Decoder gibt deshalb immer den Rohwert aus und die Temperaturlesarten
+    als Zusatz. Welche gilt, entscheidet :mod:`src.rc_settings` anhand des
+    dokumentierten Wertebereichs.
 
 ``0x03``
     Eine Zahl in BCD mit einer Nachkommastelle: ``03 01 50`` sind die Ziffern
@@ -74,7 +79,13 @@ TYPE_SINGLE_VALUE = 0x0F
 #: Alter Name von :data:`TYPE_SINGLE_VALUE`.
 TYPE_TEMPERATURE = TYPE_SINGLE_VALUE
 
-#: Fenster, in dem die 0.5-Grad-Lesart eines Einzelwerts physikalisch Sinn ergibt.
+#: Nullpunkt der Sollwert-Temperaturen (Raum, Vorlauf, Warmwasser).
+SETPOINT_BIAS = -20.0
+
+#: Nullpunkt der Aussentemperaturen.
+OUTDOOR_BIAS = -40.0
+
+#: Fenster, in dem eine Sollwert-Temperatur physikalisch Sinn ergibt.
 PLAUSIBLE_CELSIUS = (0.0, 90.0)
 
 #: Typbyte der Zeitfenster in den SCH-Dateien.
@@ -142,14 +153,20 @@ class DatRecord:
 
     @property
     def celsius(self) -> Optional[float]:
-        """Der Einzelwert als Temperatur gelesen: ``LO * 0.5`` Grad.
+        """Der Einzelwert als Sollwert-Temperatur: ``LO / 2 - 20`` Grad.
 
-        Nur eine Lesart, keine Zusicherung. In HT&CL.DAT stimmt sie gegen die
-        am Geraet abgelesenen Werte; in SER_1.DAT stehen unter demselben Typ
-        Parameter, die als Temperatur unsinnig sind. Deshalb immer zusammen
-        mit :attr:`celsius_plausible` verwenden.
+        Gegen die Ausgabe des Hersteller-Werkzeugs geprueft: 0x4c ergibt 18.0,
+        0x64 ergibt 30.0, 0x7e ergibt 43.0 Grad. Nur eine Lesart, keine
+        Zusicherung -- unter demselben Typ stehen auch Zaehler und Minuten,
+        die als Temperatur unsinnig sind. Deshalb immer zusammen mit
+        :attr:`celsius_plausible` verwenden.
         """
-        return self.lo * 0.5 if self.is_single_value else None
+        return self.lo * 0.5 + SETPOINT_BIAS if self.is_single_value else None
+
+    @property
+    def outdoor_celsius(self) -> Optional[float]:
+        """Der Einzelwert als Aussentemperatur: ``LO / 2 - 40`` Grad."""
+        return self.lo * 0.5 + OUTDOOR_BIAS if self.is_single_value else None
 
     @property
     def celsius_plausible(self) -> bool:
@@ -215,8 +232,9 @@ class DatRecord:
         if self.is_single_value:
             reading = f"Wert {self.lo:3d}"
             if self.celsius_plausible:
-                return f"{reading}   als Temperatur: {self.celsius:.1f} C"
-            return f"{reading}   (als Temperatur {self.celsius:.1f} C -- unplausibel)"
+                return (f"{reading}   Sollwert {self.celsius:.1f} C  /  "
+                        f"aussen {self.outdoor_celsius:.1f} C")
+            return f"{reading}   (als Temperatur unplausibel)"
         if self.hi == 0:
             return f"Wert {self.lo}"
         return f"HI {self.hi} / LO {self.lo}  (16 Bit: {self.be16})"
@@ -233,6 +251,7 @@ class DatRecord:
             "single_value": self.is_single_value,
             "celsius": self.celsius,
             "celsius_plausible": self.celsius_plausible,
+            "outdoor_celsius": self.outdoor_celsius,
             "bcd_value": self.bcd_value,
             "bcd_time": self.bcd_time,
             "description": self.describe(),

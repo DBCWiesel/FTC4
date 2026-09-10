@@ -86,15 +86,34 @@ Braucht `xlrd` (`pip install xlrd`). Die Ausgabe nennt je Eintrag den Rohwert,
 den erschlossenen Wert und den dokumentierten Bereich. Wo mehrere Lesarten
 passen, führt sie alle auf, statt eine zu behaupten.
 
+## Gegenprobe mit dem echten Export
+
+Wer denselben Kartenabzug durch das SD_TOOL laufen lässt, bekommt zwei Dateien,
+die als Referenz taugen:
+
+**`OPELOG_*.csv`** — der dekodierte Betriebslog, 226 Spalten. Über 471
+gemeinsame Zeitpunkte stimmen **alle 20 benannten Spalten exakt** mit dem
+eigenen Decoder überein. Die fünf übrigen Spalten (`Daten81`, `83`, `86`, `88`,
+`90`) gibt das Werkzeug **roh** aus — der Decoder tut das jetzt auch und führt
+die Temperaturlesart nur als Anmerkung. `tests/test_vendor_reference.py` prüft
+das automatisch, sobald die CSV unter `data/reference/opelog.csv` liegt.
+
+Achtung beim Einlesen: der Export nutzt deutsche Dezimalkommas **und** Komma
+als Trennzeichen. Jede Kommazahl wird dadurch in zwei Felder zerrissen —
+`22,5` wird zu `22` und `5`, und die Firmware-Version `12,01` gleich mit.
+`repair_row()` setzt das zusammen.
+
+**`AtwOutput_*.xls`** — die Einstellungen mit Werkseinstellung *und*
+Anlageneinstellung. Das ist die Quelle, an der die Kodierungen oben
+festgemacht wurden.
+
 ## Offene Punkte
 
 - Die Kodierung der Typ-`02`-Records (Heizkurven-Stützpunkte) ist nicht
   geklärt. Ein Record trägt dort Außen- und Vorlauftemperatur zugleich, aber
-  keine Lesart passt für alle sechs Stützpunkte. Da die Heizkurve in dieser
-  Anlage nicht aktiv ist (Zone 1 läuft auf Raumtemperaturführung), stehen dort
-  womöglich unbenutzte Werte.
+  keine der geprüften Lesarten trifft die Werte, die das Werkzeug ausgibt.
 - Mehrere Einträge aus Tab 6 zeigen auf Offsets jenseits von `SER_1.DAT` —
   die Service-Einstellungen verteilen sich vermutlich über `SER_1` und `SER_2`.
-- Einzelne Werte liegen knapp außerhalb des dokumentierten Bereichs, etwa
-  `DHW max. temp.` mit 63 °C bei dokumentierten 40–60 °C. Die Tabelle stammt
-  von 2013; neuere Firmware erlaubt möglicherweise mehr.
+- Mehrere `SER_1`-Einträge liefern unter keiner Lesart den Wert, den das
+  Werkzeug ausgibt. Die Byte-Nummern für Tab 6 scheinen sich zwischen
+  Firmware-Ständen verschoben zu haben.

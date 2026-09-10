@@ -6,11 +6,21 @@ dass Temperaturen in 0.5-Grad-Schritten kodiert sind::
 
     celsius = raw_value * 0.5
 
-Belegt durch die vom Geraet abgelesenen Werte:
+Der Nullpunkt haengt vom Parameter ab. Fuer Sollwerte (Raum-, Vorlauf-,
+Warmwassertemperatur) liegt er bei -20::
 
-    0x4c (76)  ->  38.0 C
-    0x64 (100) ->  50.0 C
-    0x5a (90)  ->  45.0 C
+    celsius = raw / 2 - 20
+
+Gegen die Ausgabe des Hersteller-Werkzeugs auf denselben Dateien geprueft:
+
+    0x4c (76)  ->  18.0 C
+    0x64 (100) ->  30.0 C
+    0x5a (90)  ->  25.0 C
+
+Fuer Aussentemperaturen liegt der Nullpunkt bei -40, weil dort Minusgrade
+gebraucht werden::
+
+    celsius = raw / 2 - 40
 
 Das Modul ist bewusst abhaengigkeitsfrei: es arbeitet direkt auf ``bytes``
 und benoetigt weder ``FTC4Analyzer`` noch externe Pakete. Ein Analyzer-Puffer
@@ -49,6 +59,12 @@ __all__ = [
 
 #: Aufloesung der FTC4-Temperaturkodierung in Grad Celsius pro Rohwert-Schritt.
 HALF_STEP = 0.5
+
+#: Nullpunkt der Sollwert-Temperaturen (Raum, Vorlauf, Warmwasser).
+SETPOINT_BIAS = -20.0
+
+#: Nullpunkt der Aussentemperaturen -- deckt -40 .. +87.5 C ab.
+OUTDOOR_BIAS = -40.0
 
 #: Breite in Bytes je unterstuetzter Kodierung.
 _ENCODING_WIDTH: Mapping[str, int] = {
@@ -176,12 +192,16 @@ class TemperatureDecoder:
 
     HALF_STEP = HALF_STEP
 
-    #: Am Geraet abgelesene Referenzwerte: Rohwert -> Grad Celsius.
-    #: Grundlage der Validierung in :meth:`validate_known_values`.
+    #: Referenzwerte, gegen die Ausgabe des Hersteller-Werkzeugs auf den
+    #: eigenen Dateien geprueft: Rohwert -> Grad Celsius, Sollwert-Nullpunkt.
+    #:
+    #: Die Projektunterlagen fuehrten fuer dieselben Rohwerte 38, 50 und 45 C
+    #: -- durchgehend 20 K zu hoch, weil dort der Nullpunkt fehlte. Diese drei
+    #: Zahlen waren eine Annahme, keine Ablesung.
     KNOWN_VALUES: Mapping[int, float] = {
-        0x4C: 38.0,
-        0x64: 50.0,
-        0x5A: 45.0,
+        0x4C: 18.0,
+        0x64: 30.0,
+        0x5A: 25.0,
     }
 
     #: Erwartete Dateigroesse einer FTC4-DAT-Datei (ein Sektor).
@@ -210,9 +230,10 @@ class TemperatureDecoder:
             offset=3 * record + 2,
             encoding="u8",
             scale=HALF_STEP,
+            bias=SETPOINT_BIAS,
             valid_range=(0.0, 90.0),
-            confidence="encoding_confirmed",
-            note="Kodierung belegt, Bedeutung der Position offen",
+            confidence="bestaetigt",
+            note="gegen die Ausgabe des Hersteller-Werkzeugs geprueft",
         )
         for record in (2, 3, 4, 5, 6, 10, 11, 12)
     )
@@ -222,14 +243,36 @@ class TemperatureDecoder:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def decode_setpoint(byte_value: int) -> float:
+        """Sollwert-Temperatur: ``raw / 2 - 20`` Grad Celsius.
+
+        Gilt fuer Raum-, Vorlauf- und Warmwassertemperaturen in HT&CL.DAT und
+        DHW.DAT.
+
+        >>> TemperatureDecoder.decode_setpoint(0x4c)
+        18.0
+        """
+        return TemperatureDecoder._scale_raw(byte_value, HALF_STEP, SETPOINT_BIAS)
+
+    @staticmethod
+    def decode_outdoor(byte_value: int) -> float:
+        """Aussentemperatur: ``raw / 2 - 40`` Grad Celsius.
+
+        >>> TemperatureDecoder.decode_outdoor(90)
+        5.0
+        """
+        return TemperatureDecoder._scale_raw(byte_value, HALF_STEP, OUTDOOR_BIAS)
+
+    @staticmethod
     def decode_0_5_degree_steps(byte_value: int) -> float:
-        """Konvertiert einen Rohwert in Grad Celsius (0.5-Grad-Schritte).
+        """Nur die Skalierung: ``raw * 0.5``, ohne Nullpunkt.
+
+        Das ist die Rechenschicht, nicht die Temperatur. Wer eine Temperatur
+        will, nimmt :meth:`decode_setpoint` oder :meth:`decode_outdoor` --
+        ohne Nullpunkt liegt das Ergebnis 20 bzw. 40 K zu hoch.
 
         >>> TemperatureDecoder.decode_0_5_degree_steps(0x4c)
         38.0
-
-        Raises:
-            TemperatureDecodeError: bei nicht-ganzzahligem oder negativem Wert.
         """
         return TemperatureDecoder._scale_raw(byte_value, HALF_STEP)
 
@@ -237,6 +280,20 @@ class TemperatureDecoder:
     def decode_direct_celsius(byte_value: int) -> float:
         """Konvertiert einen Rohwert bei 1-Grad-Kodierung (Alternativhypothese)."""
         return TemperatureDecoder._scale_raw(byte_value, 1.0)
+
+    @staticmethod
+    def encode_setpoint(celsius: float) -> int:
+        """Rueckkonvertierung Sollwert-Temperatur -> Rohwert.
+
+        >>> TemperatureDecoder.encode_setpoint(18.0)
+        76
+        """
+        raw = TemperatureDecoder._unscale_celsius(celsius, HALF_STEP, SETPOINT_BIAS)
+        if not 0 <= raw <= 0xFF:
+            raise TemperatureDecodeError(
+                f"{celsius} C ergibt Rohwert {raw}, passt nicht in ein Byte (0..255)"
+            )
+        return raw
 
     @staticmethod
     def encode_0_5_degree_steps(celsius: float) -> int:
@@ -454,7 +511,7 @@ class TemperatureDecoder:
         """
         checks: List[Dict[str, object]] = []
         for raw, expected in sorted(cls.KNOWN_VALUES.items()):
-            actual = cls.decode_0_5_degree_steps(raw)
+            actual = cls.decode_setpoint(raw)
             checks.append(
                 {
                     "raw": raw,
@@ -462,7 +519,7 @@ class TemperatureDecoder:
                     "expected": expected,
                     "actual": actual,
                     "match": actual == expected,
-                    "roundtrip_ok": cls.encode_0_5_degree_steps(actual) == raw,
+                    "roundtrip_ok": cls.encode_setpoint(actual) == raw,
                 }
             )
         ok = all(check["match"] and check["roundtrip_ok"] for check in checks)

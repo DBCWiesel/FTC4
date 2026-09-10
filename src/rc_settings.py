@@ -178,8 +178,8 @@ def _readings(record: DatRecord) -> Dict[str, float]:
         ("LO ", record.lo), ("HI ", record.hi)
     ):
         out[f"{prefix}Rohwert"] = float(raw)
-        out[f"{prefix}Halbgrad"] = raw * 0.5
-        out[f"{prefix}Halbgrad -40"] = raw / 2 - 40
+        out[f"{prefix}Sollwert (/2-20)"] = raw / 2 - 20
+        out[f"{prefix}Aussen (/2-40)"] = raw / 2 - 40
     return out
 
 

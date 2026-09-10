@@ -10,7 +10,7 @@ src/rc_settings.py                   Einstellungen anhand der Herstellertabelle
 src/dat_decoder.py                   SETTING/*.DAT: Records, Zeitprogramme
 src/log_decoder.py                   LOG/*.LOG: Report, Diff, Zeitreihe
 src/temperature_decoder.py           Rechenschicht: 0,5-°C-Kodierung
-tests/                               273 Tests
+tests/                               284 Tests
 docs/HOME_ASSISTANT.md               Werte aus HA holen und zuordnen
 docs/SD_TOOL.md                      was das Hersteller-Werkzeug preisgibt
 docs/DAT_FORMAT.md                   DAT-Format: Record-Struktur
@@ -136,7 +136,10 @@ Tests gegen echte Gerätedaten (`TestAgainstRealDeviceData`,
 | LOG: Zeitstempel `YY MM DD HH MM`, Mitternacht als Stunde 24 | bestätigt an 473 Logs |
 | LOG: `LE16/100` und `Byte/2−40` als Temperatur | bestätigt gegen HA-Sensoren |
 | LOG: 13 Temperaturspalten + 7 Digitaleingänge benannt | Herstellertabelle, 11 davon gegengeprüft |
-| DAT: Typ `03`/`04` = BCD-Zahl bzw. BCD-Uhrzeit | bestätigt an 8 Werksvorgaben |
+| DAT: Typ `03`/`04` = BCD-Zahl bzw. BCD-Uhrzeit | bestätigt an 9 Werten |
+| DAT: Sollwert-Temperatur = `LO/2 − 20`, außen `LO/2 − 40` | bestätigt gegen den Hersteller-Export |
+| DAT: `celsius = raw * 0.5` aus den Projektunterlagen | **widerlegt**, 20 K zu hoch |
+| LOG: 20 benannte Spalten gegen den Hersteller-Export | exakt gleich über 471 Zeitpunkte |
 | DAT: Byte-Nummern der Herstellertabelle sind Vielfache von 3 | bestätigt |
 | Sollwerte in HT&CL.DAT auf Offset `0x02`/`0x04` | **widerlegt** |
 | Bedeutung der übrigen Log-Felder und aller DAT-Records | **offen** |

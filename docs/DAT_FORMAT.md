@@ -54,29 +54,38 @@ analog dazu einfach das Datenfeld eines Typ-`01`-Records in INIT.DAT.
 
 ### Typ `0x0f` = Einzelwert-Parameter
 
-Die Nutzlast steckt allein im LO-Byte (HI ist 0).
+Die Nutzlast steckt allein im LO-Byte. **Wie er zu lesen ist, hängt vom
+Parameter ab** — gegen die Ausgabe des Hersteller-Werkzeugs auf denselben
+Dateien geprüft:
 
-**In HT&CL.DAT sind diese Werte Temperaturen in 0,5-°C-Schritten** — dort
-stehen die drei am Gerät abgelesenen Referenzwerte:
+| Art des Werts | Formel | Beleg |
+|---------------|--------|-------|
+| Sollwert-Temperatur (Raum, Vorlauf, Warmwasser) | `LO / 2 − 20` | 6 Treffer |
+| Außentemperatur | `LO / 2 − 40` | 2 Treffer |
+| Zähler, Minuten, Auswahlwert | `LO` direkt | 6 Treffer |
 
-| Record | Offset | Roh | Wert |
-|--------|--------|-----|------|
-| 2 | `0x006` | `0f 00 4c` | **38,0 °C** |
-| 3 | `0x009` | `0f 00 64` | **50,0 °C** |
-| 4 | `0x00c` | `0f 00 5a` | **45,0 °C** |
-| 5 | `0x00f` | `0f 00 5a` | 45,0 °C |
-| 6 | `0x012` | `0f 00 46` | 35,0 °C |
-| 10 | `0x01e` | `0f 00 50` | 40,0 °C |
-| 11 | `0x021` | `0f 00 6e` | 55,0 °C |
-| 12 | `0x024` | `0f 00 6e` | 55,0 °C |
+Der tiefere Nullpunkt bei Außentemperaturen deckt Minusgrade ab (−40 … +87,5 °C),
+der flachere bei Sollwerten den nutzbaren Bereich (−20 … +107,5 °C).
 
-Damit ist die 0,5-°C-Hypothese aus den Projektunterlagen **an echten Daten
-bestätigt** — und zugleich klar, wo die Werte wirklich stehen.
+### Die widerlegte 0,5-°C-Hypothese
 
-**Aber:** Typ `0x0f` ist nicht auf Temperaturen festgelegt. `SER_1.DAT` enthält
-unter demselben Typ Werte bis 230, die als Temperatur (115 °C) unsinnig wären.
-Der Decoder gibt deshalb immer den Rohwert aus und die Temperaturlesart nur
-als gekennzeichneten Zusatz, mit Plausibilitätsmarkierung.
+Die Projektunterlagen führten `celsius = byte * 0.5` mit drei „bewiesenen"
+Beispielen. Das Hersteller-Werkzeug entscheidet anders:
+
+| Rohwert | Unterlagen | Werkzeug | Differenz |
+|---------|-----------|----------|-----------|
+| `0x4c` (76) | 38,0 °C | **18,0 °C** | −20 K |
+| `0x64` (100) | 50,0 °C | **30,0 °C** | −20 K |
+| `0x5a` (90) | 45,0 °C | **25,0 °C** | −20 K |
+
+Durchgängig 20 K zu hoch — der Nullpunkt fehlte. Die drei Werte waren eine
+Annahme, keine Ablesung. Die Skalierung 0,5 °C je Schritt stimmt, der Nullpunkt
+nicht.
+
+Gegenprobe an einem Wert, der vorher aus dem dokumentierten Bereich fiel:
+`DHW max. temp.` steht auf `0f 00 7e` (126). Alt gerechnet 63 °C — außerhalb der
+dokumentierten 40–60 °C. Richtig gerechnet 43,0 °C, und genau das gibt das
+Werkzeug aus.
 
 ### Typ `0x03` = BCD-Zahl, Typ `0x04` = BCD-Uhrzeit
 

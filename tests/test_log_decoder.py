@@ -119,22 +119,36 @@ class TestEncodings:
     def test_temp_centi_resolves_half_degrees(self, synthetic_log):
         assert field_by_key(FTC4Log(synthetic_log), "soll03").value == 28.5
 
-    def test_temp_half40_byte(self, synthetic_log):
-        """Byte/2-40: 119 -> 19.5 C."""
+    def test_unnamed_byte_stays_raw(self, synthetic_log):
+        """0x060 gibt auch das Hersteller-Werkzeug roh aus (Data81)."""
         decoded = field_by_key(FTC4Log(synthetic_log), "vor01")
         assert decoded.raw == 119
-        assert decoded.value == 19.5
+        assert decoded.value == 119
+        assert decoded.alternatives["temp_half40"] == 19.5
 
-    @pytest.mark.parametrize("raw, celsius", [(0, -40.0), (80, 0.0), (120, 20.0), (255, 87.5)])
+    @pytest.mark.parametrize("raw, celsius", [(0, -40.0), (80, 0.0), (112, 16.0), (255, 87.5)])
     def test_half40_covers_negative_range(self, raw, celsius):
-        log = FTC4Log(build_log({0x60: bytes([raw])}))
-        assert field_by_key(log, "vor01").value == celsius
+        """Die Aussentemperatur deckt Minusgrade ab: Byte/2-40."""
+        log = FTC4Log(build_log({0x64: bytes([raw])}))
+        assert field_by_key(log, "vor03").value == celsius
 
-    def test_confirmed_status_byte_is_read_as_temperature(self, synthetic_log):
-        """0x067 traegt nachweislich eine Temperatur im 0.5-Grad-Raster."""
+    def test_unnamed_status_byte_stays_raw_like_the_reference(self, synthetic_log):
+        """Das Hersteller-Werkzeug gibt 0x067 roh aus -- der Decoder auch.
+
+        Die Temperaturlesart steht als Nebenlesart daneben, aber nicht als
+        Wert: der Hersteller fuehrt diese Spalte als Data86 ohne Deutung.
+        """
         decoded = field_by_key(FTC4Log(synthetic_log), "rec01_status")
         assert decoded.raw == 131
-        assert decoded.value == 25.5
+        assert decoded.value == 131
+        assert decoded.alternatives["temp_half40"] == 25.5
+
+    def test_outdoor_byte_is_read_as_temperature(self, synthetic_log):
+        """0x064 gibt auch das Hersteller-Werkzeug als Temperatur aus."""
+        data = bytearray(synthetic_log)
+        data[0x64] = 112
+        data[511] = (-sum(data[:511])) % 256
+        assert field_by_key(FTC4Log(bytes(data)), "vor03").value == 16.0
 
     def test_code_status_byte_stays_raw(self, synthetic_log):
         """Die hinteren Statusbytes fuehren Codes, keine Temperaturen."""

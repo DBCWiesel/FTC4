@@ -45,7 +45,7 @@ class TestBuildReport:
         assert "TEIL 1 -- KONFIGURATION" in report
         assert "TEIL 2 -- BETRIEBSLOGS" in report
         assert "HT&CL.DAT" in report
-        assert "38.0 C" in report
+        assert "18.0 C" in report
 
     def test_counts_files(self, card):
         report = build_report(card)
