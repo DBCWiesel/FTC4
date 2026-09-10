@@ -22,9 +22,23 @@ START="${2:-}"
 END="${3:-}"
 OUTDIR="${4:-/config/ftc4}"
 
+# Statt zweier UTC-Zeitstempel genuegt "letzte N Minuten" -- praktisch, wenn
+# gerade etwas laeuft und man nicht erst Ortszeit nach UTC umrechnen will.
+case "$START" in
+    last)
+        MINUTES="${END:-120}"
+        START=$(date -u -d "$MINUTES minutes ago" +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null) \
+            || START=$(date -u -v-"${MINUTES}"M +%Y-%m-%dT%H:%M:%S+00:00)
+        END=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)
+        OUTDIR="${4:-/config/ftc4}"
+        echo "Zeitraum: letzte $MINUTES Minuten ($START bis $END)"
+        ;;
+esac
+
 if [ -z "$DEVICE_ID" ] || [ -z "$START" ] || [ -z "$END" ]; then
     echo "Aufruf: $0 <geraete-id> <start-utc> <ende-utc> [zielverzeichnis]" >&2
-    echo "Beispiel: $0 889ea... 2026-09-09T20:36:00+00:00 2026-09-10T04:26:00+00:00" >&2
+    echo "   oder: $0 <geraete-id> last <minuten> [zielverzeichnis]" >&2
+    echo "Beispiel: $0 889ea... last 120" >&2
     exit 2
 fi
 
