@@ -12,3 +12,4 @@ output/
 
 # Geraetedaten von der SD-Karte gehoeren nicht ins Repository
 data/*.DAT
+data/logs/

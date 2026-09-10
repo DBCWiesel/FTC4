@@ -71,6 +71,7 @@ class SetpointSpec:
         offset:       Byte-Offset in der DAT-Datei.
         encoding:     "u8", "s8", "u16le" oder "s16le".
         scale:        Faktor Rohwert -> Grad Celsius (0.5 bei Halbgradschritten).
+        bias:         Additiver Nullpunkt: celsius = raw * scale + bias.
         valid_range:  Plausibilitaetsfenster (min, max) in Grad Celsius.
         confidence:   "confirmed" (am Geraet verifiziert) oder "hypothesis".
         note:         Freitext-Hinweis fuer Reports.
@@ -81,6 +82,7 @@ class SetpointSpec:
     offset: int
     encoding: str = "u8"
     scale: float = HALF_STEP
+    bias: float = 0.0
     valid_range: Tuple[float, float] = (0.0, 90.0)
     confidence: str = "hypothesis"
     note: str = ""
@@ -244,14 +246,16 @@ class TemperatureDecoder:
         return raw
 
     @staticmethod
-    def encode_to_bytes(celsius: float, encoding: str = "u8", scale: float = HALF_STEP) -> bytes:
+    def encode_to_bytes(
+        celsius: float, encoding: str = "u8", scale: float = HALF_STEP, bias: float = 0.0
+    ) -> bytes:
         """Kodiert Grad Celsius in die Rohbytes der angegebenen Kodierung.
 
         >>> TemperatureDecoder.encode_to_bytes(50.0, "u16le")
         b'd\\x00'
         """
         width = TemperatureDecoder._encoding_width(encoding)
-        raw = TemperatureDecoder._unscale_celsius(celsius, scale)
+        raw = TemperatureDecoder._unscale_celsius(celsius, scale, bias)
         signed = encoding in _SIGNED_ENCODINGS
         try:
             return raw.to_bytes(width, "little", signed=signed)
@@ -261,26 +265,27 @@ class TemperatureDecoder:
             ) from exc
 
     @staticmethod
-    def _scale_raw(raw_value: int, scale: float) -> float:
+    def _scale_raw(raw_value: int, scale: float, bias: float = 0.0) -> float:
         if isinstance(raw_value, bool) or not isinstance(raw_value, int):
             raise TemperatureDecodeError(
                 f"Rohwert muss ein int sein, ist {type(raw_value).__name__}: {raw_value!r}"
             )
-        return raw_value * scale
+        return raw_value * scale + bias
 
     @staticmethod
-    def _unscale_celsius(celsius: float, scale: float) -> int:
+    def _unscale_celsius(celsius: float, scale: float, bias: float = 0.0) -> int:
         if isinstance(celsius, bool) or not isinstance(celsius, (int, float)):
             raise TemperatureDecodeError(
                 f"Temperatur muss numerisch sein, ist {type(celsius).__name__}: {celsius!r}"
             )
-        steps = celsius / scale
+        steps = (celsius - bias) / scale
         raw = round(steps)
         # Floating-Point-Toleranz: 0.5-Schritte sind binaer exakt, aber ein
         # Aufrufer kann z.B. 38.000000001 aus einer Berechnung hereinreichen.
         if abs(steps - raw) > 1e-9:
             raise TemperatureDecodeError(
-                f"{celsius} C ist kein Vielfaches von {scale} C und nicht darstellbar"
+                f"{celsius} C ist kein Vielfaches von {scale} C (Nullpunkt {bias}) "
+                f"und nicht darstellbar"
             )
         return raw
 
@@ -319,11 +324,15 @@ class TemperatureDecoder:
 
     @staticmethod
     def decode_at(
-        data: bytes, offset: int, encoding: str = "u8", scale: float = HALF_STEP
+        data: bytes,
+        offset: int,
+        encoding: str = "u8",
+        scale: float = HALF_STEP,
+        bias: float = 0.0,
     ) -> float:
         """Liest ``offset`` und rechnet den Rohwert direkt in Grad Celsius um."""
         return TemperatureDecoder._scale_raw(
-            TemperatureDecoder.read_raw(data, offset, encoding), scale
+            TemperatureDecoder.read_raw(data, offset, encoding), scale, bias
         )
 
     # ------------------------------------------------------------------
@@ -382,7 +391,7 @@ class TemperatureDecoder:
             # Offset ausserhalb des Puffers - z.B. verkuerzte Testdaten.
             return None
 
-        celsius = cls._scale_raw(raw, spec.scale)
+        celsius = cls._scale_raw(raw, spec.scale, spec.bias)
         chunk = data[spec.offset : spec.offset + spec.width]
         return Setpoint(
             key=spec.key,
@@ -406,7 +415,9 @@ class TemperatureDecoder:
             if encoding == spec.encoding:
                 continue
             try:
-                alternatives[encoding] = cls.decode_at(data, spec.offset, encoding, spec.scale)
+                alternatives[encoding] = cls.decode_at(
+                    data, spec.offset, encoding, spec.scale, spec.bias
+                )
             except TemperatureDecodeError:
                 continue
         return alternatives

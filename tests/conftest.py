@@ -52,3 +52,53 @@ def real_ht_cl() -> bytes:
     if not path.is_file():
         pytest.skip(f"{path} nicht vorhanden - Validierung gegen Geraetedaten uebersprungen")
     return path.read_bytes()
+
+
+# ----------------------------------------------------------------------
+# Logdateien
+# ----------------------------------------------------------------------
+
+LOG_DIR = DATA_DIR / "logs"
+
+
+def build_log(fields: "dict[int, bytes]", year=26, month=9, day=9, hour=22, minute=36) -> bytes:
+    """Baut eine syntaktisch korrekte 512-Byte-Logdatei inklusive Pruefsumme.
+
+    ``fields`` bildet Offsets auf Rohbytes ab. Die Pruefsumme wird so gesetzt,
+    dass die Summe aller 512 Bytes 0 modulo 256 ergibt -- genau wie es die
+    FTC4 in beiden Referenzdateien tut.
+    """
+    data = bytearray(512)
+    data[0:6] = bytes([year, month, day, hour, minute, 0x12])
+    for offset, raw in fields.items():
+        data[offset : offset + len(raw)] = raw
+    data[511] = (-sum(data[:511])) % 256
+    return bytes(data)
+
+
+@pytest.fixture
+def synthetic_log() -> bytes:
+    """Ein kuenstliches Log mit bekannten Werten an den nachgewiesenen Offsets.
+
+    Keine Geraetedaten -- bildet nur die Struktur nach: 20.00 C als LE16/100
+    auf 0x4e, 25.50 C auf 0x65 mit Statusbyte, und ein Byte im 0.5-Grad-Raster
+    mit Nullpunkt -40 auf 0x60.
+    """
+    return build_log({
+        0x4E: (2000).to_bytes(2, "little"),   # 20.00 C
+        0x52: (2850).to_bytes(2, "little"),   # 28.50 C
+        0x60: bytes([119]),                   # 119/2-40 = 19.5 C
+        0x65: (2550).to_bytes(2, "little"),   # 25.50 C
+        0x67: bytes([131]),                   # 131/2-40 = 25.5 C
+    })
+
+
+@pytest.fixture
+def real_logs() -> "list[Path]":
+    """Echte .LOG-Dateien aus ``data/logs/`` -- uebersprungen, wenn keine da sind."""
+    if not LOG_DIR.is_dir():
+        pytest.skip(f"{LOG_DIR} nicht vorhanden - Validierung gegen Geraetedaten uebersprungen")
+    found = sorted(p for p in LOG_DIR.glob("*.LOG") if p.stat().st_size == 512)
+    if not found:
+        pytest.skip(f"keine 512-Byte-Logs in {LOG_DIR}")
+    return found
