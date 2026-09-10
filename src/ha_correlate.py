@@ -78,42 +78,65 @@ class MatchScore:
     max_abs_error: float
     correlation: Optional[float]
     offset: float             # mittlere Differenz Sensor minus Logfeld
+    median_offset: float      # robuster Versatz Sensor minus Logfeld
+    residual: float           # typische Abweichung nach Abzug des Versatzes
+    reference_span: float     # Spannweite des Logfelds im Vergleichsfenster
+    candidate_span: float     # Spannweite des Sensors im Vergleichsfenster
     tolerance: float = DEFAULT_TOLERANCE
+
+    @property
+    def varies(self) -> bool:
+        """Bewegen sich beide Reihen im Vergleichsfenster?
+
+        Nur dann ist eine Uebereinstimmung ein Beweis. Zwei konstante Reihen
+        auf demselben Wert passen zwangslaeufig zusammen.
+        """
+        return self.reference_span > 0 and self.candidate_span > 0
 
     @property
     def is_match(self) -> bool:
         """Deckungsgleich: typische Abweichung innerhalb der Toleranz.
 
-        Bewertet wird der Median, nicht der Anteil innerhalb der Toleranz. HA
-        und FTC4 tasten in unterschiedlichem Raster ab; an jedem Sprung
-        entsteht dadurch kurz eine Abweichung. Der Median steckt das weg, ein
-        echter Versatz nicht.
+        Bewertet wird der Median, nicht der Anteil innerhalb der Toleranz oder
+        die Korrelation. Beides taugt hier nicht:
+
+        * HA schreibt nur bei Aenderung, die FTC4 stur jede Minute. An jedem
+          Sprung entsteht dadurch kurz eine Abweichung -- der Anteil innerhalb
+          der Toleranz faellt, obwohl die Reihen dieselben sind.
+        * Diese Signale sind grob gerastert und haben winzige Spannweiten;
+          manches Feld kennt nur zwei Werte. Pearson liefert dort auch bei
+          perfekter Uebereinstimmung nur maessige Werte.
+
+        Der Mittelwert wird zusaetzlich begrenzt, damit ein Feld, das nur
+        zeitweise passt, nicht ueber den Median durchrutscht.
         """
-        if self.samples < 10 or self.median_abs_error > self.tolerance:
-            return False
-        # Bewegt sich das Feld, muss auch der Verlauf passen.
-        return self.correlation is None or self.correlation >= 0.9
+        return (
+            self.samples >= 10
+            and self.median_abs_error <= self.tolerance
+            and self.mean_abs_error <= 3 * self.tolerance
+        )
 
     @property
     def is_shifted_match(self) -> bool:
-        """Gleicher Verlauf, aber konstant versetzt -- z.B. Vor- und Ruecklauf."""
+        """Gleicher Verlauf, konstant versetzt -- z.B. Vorlauf gegen Ruecklauf.
+
+        Geprueft wird ueber den Rest nach Abzug des Versatzes, nicht ueber die
+        Korrelation: bei Stufensignalen mit kleiner Spannweite ist der Rest das
+        deutlich schaerfere Kriterium.
+        """
         return (
             self.samples >= 10
             and not self.is_match
-            and self.correlation is not None
-            and self.correlation >= 0.95
+            and abs(self.median_offset) > self.tolerance
+            and self.residual <= self.tolerance
         )
 
     @property
     def confidence(self) -> str:
-        """Wie belastbar der Treffer ist.
-
-        Ein Gleichstand zweier konstanter Reihen ist kein Beweis -- dann passt
-        jeder Sensor mit demselben Wert.
-        """
+        """Wie belastbar der Treffer ist."""
         if not self.is_match:
             return "kein Treffer"
-        return "hoch" if self.correlation is not None else "schwach (Reihe konstant)"
+        return "hoch" if self.varies else "schwach (beide Reihen konstant)"
 
     def as_dict(self) -> Dict[str, object]:
         return {
@@ -123,6 +146,9 @@ class MatchScore:
             "within_tolerance": round(self.within_tolerance, 4),
             "median_abs_error": round(self.median_abs_error, 3),
             "mean_abs_error": round(self.mean_abs_error, 3),
+            "median_offset": round(self.median_offset, 3),
+            "residual": round(self.residual, 3),
+            "varies": self.varies,
             "max_abs_error": round(self.max_abs_error, 3),
             "correlation": None if self.correlation is None else round(self.correlation, 4),
             "offset": round(self.offset, 3),
@@ -229,36 +255,51 @@ def load_log_series(
 # ----------------------------------------------------------------------
 
 def align(
-    reference: Sequence[Sample], candidate: Sequence[Sample], max_gap_minutes: float = 10.0
+    reference: Sequence[Sample],
+    candidate: Sequence[Sample],
+    max_hold_minutes: float = 120.0,
+    snap_seconds: float = 90.0,
 ) -> List[Tuple[dt.datetime, float, float]]:
     """Tastet ``candidate`` an den Zeitpunkten von ``reference`` ab.
 
-    Genommen wird der zeitlich naechstgelegene Punkt, davor oder danach. Nur
-    den letzten Wert davor zu halten waere unfair, wenn beide Seiten in
-    unterschiedlichem Raster abtasten: an jedem Sprung entstuende eine
-    Abweichung von der halben Rasterbreite, obwohl die Reihen identisch sind.
+    Home-Assistant-Verlaeufe sind **Ereignisse, keine Abtastwerte**: ein
+    Zustand wird nur bei Aenderung geschrieben und gilt bis zur naechsten
+    Aenderung weiter. Steht ein Fuehler eine Stunde still, gibt es in dieser
+    Stunde keinen Eintrag -- der Wert ist trotzdem bekannt. Genommen wird
+    deshalb der letzte Wert zum Referenzzeitpunkt oder davor.
 
-    Punkte, zu denen der naechste Kandidatenwert weiter als
-    ``max_gap_minutes`` entfernt liegt, entfallen -- so liefert ein
-    ausgefallener Sensor keine Scheintreffer.
+    Zwei Feinheiten:
+
+    * ``max_hold_minutes`` begrenzt, wie lange ein Wert fortgeschrieben wird.
+      Das schuetzt vor einem Sensor, der laengst ausgefallen ist.
+    * ``snap_seconds``: liegt der naechste Eintrag nur Sekunden nach dem
+      Referenzzeitpunkt und naeher als der vorherige, wird er genommen. HA
+      und FTC4 lesen nicht im selben Moment; ohne das kostet jeder Sprung
+      unnoetig Genauigkeit.
     """
     if not reference or not candidate:
         return []
     aligned: List[Tuple[dt.datetime, float, float]] = []
-    max_gap = dt.timedelta(minutes=max_gap_minutes)
+    max_hold = dt.timedelta(minutes=max_hold_minutes)
+    snap = dt.timedelta(seconds=snap_seconds)
     index = 0
 
     for stamp, ref_value in reference:
         while index + 1 < len(candidate) and candidate[index + 1][0] <= stamp:
             index += 1
-        best = candidate[index]
-        if index + 1 < len(candidate):
-            following = candidate[index + 1]
-            if abs(following[0] - stamp) < abs(best[0] - stamp):
-                best = following
-        if abs(best[0] - stamp) > max_gap:
+
+        previous = candidate[index] if candidate[index][0] <= stamp else None
+        following = candidate[index + 1] if index + 1 < len(candidate) else None
+        if previous is None and candidate[index][0] > stamp:
+            following = candidate[index]
+
+        chosen = previous
+        if following is not None and following[0] - stamp <= snap:
+            if chosen is None or (following[0] - stamp) < (stamp - chosen[0]):
+                chosen = following
+        if chosen is None or abs(chosen[0] - stamp) > max_hold:
             continue
-        aligned.append((stamp, ref_value, best[1]))
+        aligned.append((stamp, ref_value, chosen[1]))
     return aligned
 
 
@@ -289,6 +330,8 @@ def score_pair(
     field_values = [row[1] for row in aligned]
     entity_values = [row[2] for row in aligned]
     errors = [abs(a - b) for a, b in zip(field_values, entity_values)]
+    differences = [b - a for a, b in zip(field_values, entity_values)]
+    median_offset = statistics.median(differences)
     return MatchScore(
         field_key=field_key,
         entity_id=entity_id,
@@ -298,7 +341,11 @@ def score_pair(
         mean_abs_error=statistics.fmean(errors),
         max_abs_error=max(errors),
         correlation=_pearson(field_values, entity_values),
-        offset=statistics.fmean(b - a for a, b in zip(field_values, entity_values)),
+        offset=statistics.fmean(differences),
+        median_offset=median_offset,
+        residual=statistics.median(abs(d - median_offset) for d in differences),
+        reference_span=max(field_values) - min(field_values),
+        candidate_span=max(entity_values) - min(entity_values),
         tolerance=tolerance,
     )
 
@@ -318,8 +365,11 @@ def rank_matches(
             if (score := score_pair(field_key, entity_id, field_samples, entity_samples,
                                     tolerance)) is not None
         ]
+        # Genauigkeit entscheidet vor Spannweite: bei Gleichstand im Median ist
+        # der kleinere mittlere Fehler das bessere Kriterium, nicht die groessere
+        # Spannweite des Kandidaten.
         scores.sort(
-            key=lambda s: (s.median_abs_error, -(s.correlation or -1.0), s.mean_abs_error)
+            key=lambda s: (s.median_abs_error, s.mean_abs_error, -s.candidate_span)
         )
         ranked[field_key] = scores[:top]
     return ranked
@@ -334,11 +384,15 @@ def detect_utc_offset(
     """Ermittelt den Zeitversatz, bei dem die meisten Felder zusammenpassen.
 
     Die FTC4 schreibt lokale Zeit, Home Assistant liefert UTC. Statt den
-    Versatz raten zu lassen, wird er durchprobiert: der Wert mit den meisten
-    Treffern gewinnt.
+    Versatz raten zu lassen, wird er durchprobiert.
+
+    Gezaehlt werden dabei nur Treffer auf **bewegten** Reihen. Zwei konstante
+    Reihen auf demselben Wert passen bei jedem beliebigen Versatz zusammen --
+    wer die mitzaehlt, bekommt den Versatz geliefert, bei dem die Ueberlappung
+    am kleinsten ist und nur noch die konstanten Sensoren uebrig bleiben.
 
     Returns:
-        ``(offset_in_stunden, anzahl_treffer)``.
+        ``(offset_in_stunden, anzahl_starker_treffer)``.
     """
     best_offset, best_hits, best_quality = 0.0, 0, float("-inf")
     for offset in candidates:
@@ -349,7 +403,8 @@ def detect_utc_offset(
         best_per_field = [scores[0] for scores in ranked.values() if scores]
         if not best_per_field:
             continue
-        hits = sum(score.is_match for score in best_per_field)
+        # Nur Treffer zaehlen, bei denen sich beide Reihen bewegen.
+        hits = sum(score.is_match and score.varies for score in best_per_field)
         # Bei null Treffern entscheidet der Gleichlauf: so findet das Verfahren
         # auch dann den richtigen Versatz, wenn die Toleranz zu eng gewaehlt ist.
         quality = (hits, sum(s.correlation or 0.0 for s in best_per_field))
@@ -381,13 +436,14 @@ def render_report(
     add(f"Zeitversatz     : {utc_offset:+.0f} h auf die HA-Zeitstempel")
     add(f"Toleranz        : {tolerance} K")
 
-    matched = {k: v for k, v in ranked.items() if v and v[0].is_match}
+    matched = {k: v for k, v in ranked.items() if v and v[0].is_match and v[0].varies}
+    weak = {k: v for k, v in ranked.items() if v and v[0].is_match and not v[0].varies}
     shifted = {k: v for k, v in ranked.items()
                if v and not v[0].is_match and v[0].is_shifted_match}
 
     add("")
     add("-" * 78)
-    add(f"ZUGEORDNET ({len(matched)})  -- Sensor und Logfeld laufen deckungsgleich")
+    add(f"ZUGEORDNET ({len(matched)})  -- beide Reihen bewegen sich und laufen gleich")
     add("-" * 78)
     if matched:
         add(f"  {'Logfeld':<20} {'Sensor':<40} {'Punkte':>7} {'Median':>7}  Guete")
@@ -400,14 +456,27 @@ def render_report(
 
     add("")
     add("-" * 78)
+    add(f"NUR KONSTANT UEBEREINSTIMMEND ({len(weak)})  -- kein Beweis, nur Hinweis")
+    add("-" * 78)
+    if weak:
+        add(f"  {'Logfeld':<20} {'Sensor':<44} Wert")
+        for key, scores in weak.items():
+            best = scores[0]
+            wert = log_series.get(key, [(None, 0.0)])[0][1]
+            add(f"  {key:<20} {best.entity_id:<44} {wert:.2f}")
+    else:
+        add("  keine")
+
+    add("")
+    add("-" * 78)
     add(f"GLEICHLAUF MIT VERSATZ ({len(shifted)})  -- verwandte Groesse, nicht dieselbe")
     add("-" * 78)
     if shifted:
-        add(f"  {'Logfeld':<20} {'Sensor':<40} {'Korr':>6} {'Versatz':>8}")
+        add(f"  {'Logfeld':<20} {'Sensor':<40} {'Rest':>6} {'Versatz':>8}")
         for key, scores in shifted.items():
             best = scores[0]
-            add(f"  {key:<20} {best.entity_id:<40} {best.correlation:6.3f} "
-                f"{best.offset:+8.2f}")
+            add(f"  {key:<20} {best.entity_id:<40} {best.residual:6.2f} "
+                f"{best.median_offset:+8.2f}")
     else:
         add("  keine")
 
@@ -424,8 +493,8 @@ def render_report(
             continue
         for score in scores:
             corr = "  --  " if score.correlation is None else f"{score.correlation:6.3f}"
-            add(f"      {score.entity_id:<40} Median {score.median_abs_error:6.2f}  "
-                f"Korr {corr}  in Toleranz {score.within_tolerance:5.1%}")
+            add(f"      {score.entity_id:<44} Median {score.median_abs_error:6.2f}  "
+                f"Mittel {score.mean_abs_error:6.2f}  Spanne {score.candidate_span:5.2f}")
 
     add("")
     add("-" * 78)
@@ -443,7 +512,7 @@ def build_names(ranked: Dict[str, List[MatchScore]]) -> Dict[str, str]:
     return {
         key: scores[0].entity_id
         for key, scores in ranked.items()
-        if scores and scores[0].is_match and scores[0].correlation is not None
+        if scores and scores[0].is_match and scores[0].varies
     }
 
 

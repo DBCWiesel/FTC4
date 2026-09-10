@@ -104,6 +104,9 @@ class FieldSpec:
     group: str = "sonstige"
     label: str = ""
     note: str = ""
+    #: "bestaetigt" (gegen benannte Sensoren abgeglichen), "wahrscheinlich"
+    #: (nur im Stillstand uebereinstimmend) oder "offen".
+    confidence: str = "offen"
 
     @property
     def width(self) -> int:
@@ -152,33 +155,84 @@ class DecodedField:
         }
 
 
+#: Am Home-Assistant-Verlauf bestaetigte Feldbedeutungen.
+#:
+#: Abgeglichen wurden 473 Logs gegen den ESPHome-Verlauf derselben Nacht
+#: (50 Sensoren, Zeitversatz +2 h). Aufgenommen ist nur, was ueber den ganzen
+#: Zeitraum deckungsgleich lief und wo sich **beide** Reihen bewegt haben --
+#: ein Gleichstand zweier konstanter Reihen ist kein Beweis.
+CONFIRMED: Dict[int, str] = {
+    0x052: "Vorlauftemperatur",
+    0x05A: "Zone 1 Raumtemperatur",
+    0x05C: "Zone 1 Raumtemperatur",
+    0x05E: "Zone 1 Raumtemperatur",
+    0x061: "Kaeltemittel Fluessigkeitstemp",
+    0x064: "Aussentemperatur",
+    0x065: "Vorlauftemperatur",
+    0x068: "Ruecklauftemperatur",
+    0x06A: "Kaeltemittel Fluessigkeitstemp",
+    0x06B: "TWW Speichertemperatur",
+    0x06D: "TWW Speichertemperatur",
+}
+
+#: Bedeutungen, die nur im Stillstand uebereinstimmten -- plausibel, aber
+#: nicht bewiesen. Zur Bestaetigung braucht es einen Zeitraum, in dem sich
+#: der Wert aendert.
+LIKELY: Dict[int, str] = {
+    0x04E: "Zone 1 Raum-Sollwert?",
+    0x056: "TWW-Sollwert?",
+    0x058: "Legionellenschutz-Temp?",
+}
+
+#: Offsets ohne Treffer im HA-Verlauf, obwohl sich der Wert bewegt: 0x060
+#: (19.0-20.0 C), 0x063 (22.5-24.0 C) und 0x067 (25.5-27.0 C). Plausible
+#: Temperaturen, aber kein passender Sensor im Export -- vermutlich Fuehler,
+#: die das ESPHome-Modul nicht ausliest.
+UNMATCHED_TEMPERATURE_BYTES = frozenset({0x060, 0x063, 0x067})
+
+#: Offsets, deren Byte nachweislich eine Temperatur traegt (Byte/2-40).
+#: Die Statusbytes der hinteren Records fuehren dagegen kleine Codes (2, 11),
+#: die als Temperatur keinen Sinn ergeben.
+TEMPERATURE_BYTES = frozenset({0x060, 0x063, 0x067, 0x06A, 0x06D})
+
+
+def _annotate(offset: int, fallback: str) -> Tuple[str, str, str]:
+    """Liefert (label, confidence, note) fuer einen Offset."""
+    if offset in CONFIRMED:
+        return CONFIRMED[offset], "bestaetigt", "gegen Home-Assistant-Verlauf abgeglichen"
+    if offset in LIKELY:
+        return LIKELY[offset], "wahrscheinlich", "stimmte nur im Stillstand ueberein"
+    return fallback, "offen", ""
+
+
 def _sensor_records() -> List[FieldSpec]:
     """Die 9 Records ab 0x65: je LE16-Temperatur plus ein Statusbyte.
 
-    Bei den ersten Records bewegt sich das Statusbyte nachweislich im
-    0.5-Grad-Raster zum LE16-Wert; bei den hinteren steht dort ein kleiner
-    konstanter Code (2 bzw. 11), der als Temperatur keinen Sinn ergibt. Das
-    Byte wird deshalb roh ausgegeben und zusaetzlich als Temperatur angeboten.
+    Bei den vorderen Records traegt das Statusbyte nachweislich eine
+    Temperatur im 0.5-Grad-Raster -- 0x06d ist die TWW-Speichertemperatur und
+    0x06a die Kaeltemittel-Fluessigkeitstemperatur, beide gegen die benannten
+    Sensoren abgeglichen. Bei den hinteren Records steht dort ein kleiner
+    konstanter Code (2 bzw. 11), der als Temperatur keinen Sinn ergibt.
     """
     specs: List[FieldSpec] = []
     for index, offset in enumerate(range(0x65, 0x80, 3), start=1):
+        label, confidence, note = _annotate(offset, f"Record {index:02d} Wert")
         specs.append(
-            FieldSpec(
-                key=f"rec{index:02d}_wert",
-                offset=offset,
-                encoding=TEMP_CENTI,
-                group="messwerte",
-                label=f"Record {index:02d} Wert",
-            )
+            FieldSpec(offset=offset, key=f"rec{index:02d}_wert", encoding=TEMP_CENTI,
+                      group="messwerte", label=label, confidence=confidence, note=note)
         )
+        status_offset = offset + 2
+        label, confidence, note = _annotate(status_offset, f"Record {index:02d} Statusbyte")
+        is_temperature = status_offset in TEMPERATURE_BYTES
         specs.append(
             FieldSpec(
+                offset=status_offset,
                 key=f"rec{index:02d}_status",
-                offset=offset + 2,
-                encoding=RAW_U8,
+                encoding=TEMP_HALF40 if is_temperature else RAW_U8,
                 group="messwerte",
-                label=f"Record {index:02d} Statusbyte",
-                note="als Temperatur: Byte/2-40",
+                label=label,
+                confidence=confidence,
+                note=note or ("" if is_temperature else "als Temperatur: Byte/2-40"),
             )
         )
     return specs
@@ -187,33 +241,32 @@ def _sensor_records() -> List[FieldSpec]:
 def _build_layout() -> Tuple[FieldSpec, ...]:
     """Das nachgewiesene Feldlayout einer FTC4-Logdatei.
 
-    Die Schluessel sind bewusst neutral (``soll01``, ``rec03_wert``): welcher
-    Offset welcher Sensor ist, ist nicht nachgewiesen und wird hier nicht
-    behauptet. Eigene Namen kommen ueber ``--names`` dazu.
+    Felder mit ``confidence="bestaetigt"`` tragen den Namen des Sensors, gegen
+    den sie abgeglichen wurden. Der Rest behaelt neutrale Platzhalter: welcher
+    Offset dort was bedeutet, ist nicht nachgewiesen.
     """
     specs: List[FieldSpec] = []
 
-    # 0x4e-0x5f: neun LE16-Werte, in den vorliegenden Dateien ueberwiegend konstant.
+    # 0x4e-0x5f: neun LE16-Werte.
     for index, offset in enumerate(range(0x4E, 0x60, 2), start=1):
+        label, confidence, note = _annotate(offset, f"Sollwert {index:02d}")
         specs.append(
-            FieldSpec(
-                key=f"soll{index:02d}",
-                offset=offset,
-                encoding=TEMP_CENTI,
-                group="sollwerte",
-                label=f"Sollwert {index:02d}",
-            )
+            FieldSpec(offset=offset, key=f"soll{index:02d}", encoding=TEMP_CENTI,
+                      group="sollwerte", label=label, confidence=confidence, note=note)
         )
 
     # 0x60-0x64: gemischte Einzelwerte vor dem Recordblock.
-    specs += [
-        FieldSpec("vor01", 0x60, TEMP_HALF40, "messwerte", "Einzelwert 0x60"),
-        FieldSpec("vor02_wert", 0x61, TEMP_CENTI, "messwerte", "Einzelwert 0x61"),
-        FieldSpec("vor02_status", 0x63, RAW_U8, "messwerte", "Statusbyte 0x63",
-                  note="als Temperatur: Byte/2-40"),
-        FieldSpec("vor03", 0x64, TEMP_HALF40, "messwerte", "Einzelwert 0x64",
-                  note="in beiden Referenzdateien konstant 0x70"),
-    ]
+    for key, offset, encoding, fallback in (
+        ("vor01", 0x60, TEMP_HALF40, "Einzelwert 0x60"),
+        ("vor02_wert", 0x61, TEMP_CENTI, "Einzelwert 0x61"),
+        ("vor02_status", 0x63, TEMP_HALF40, "Statusbyte 0x63"),
+        ("vor03", 0x64, TEMP_HALF40, "Einzelwert 0x64"),
+    ):
+        label, confidence, note = _annotate(offset, fallback)
+        specs.append(
+            FieldSpec(offset=offset, key=key, encoding=encoding, group="messwerte",
+                      label=label, confidence=confidence, note=note)
+        )
 
     specs += _sensor_records()
 
@@ -221,13 +274,8 @@ def _build_layout() -> Tuple[FieldSpec, ...]:
     for offset in (0x06, 0x0A, 0x0C, 0x0E, 0x13, 0x14, 0x1A, 0x1C, 0x3D,
                    0x87, 0x88, 0x8E, 0x8F, 0xA3, 0xA4, 0xAC):
         specs.append(
-            FieldSpec(
-                key=f"par{offset:03x}",
-                offset=offset,
-                encoding=RAW_U8,
-                group="parameter",
-                label=f"Parameter 0x{offset:03x}",
-            )
+            FieldSpec(offset=offset, key=f"par{offset:03x}", encoding=RAW_U8,
+                      group="parameter", label=f"Parameter 0x{offset:03x}")
         )
 
     return tuple(specs)
@@ -446,7 +494,9 @@ def render_text(
         add("-" * 78)
         for decoded in in_group:
             label = decoded.spec.display_label(names)
-            line = (f"  {label:<26} {decoded.format_value():>10}"
+            marker = {"bestaetigt": " *", "wahrscheinlich": " ?"}.get(
+                decoded.spec.confidence, "  ")
+            line = (f"  {label:<32}{marker} {decoded.format_value():>10}"
                     f"   [0x{decoded.spec.offset:03x} = {decoded.hex:<5} roh {decoded.raw:>5}]")
             if not decoded.plausible:
                 line += "  UNPLAUSIBEL"
@@ -456,7 +506,7 @@ def render_text(
             if decoded.spec.encoding is RAW_U8 and "temp_half40" in decoded.alternatives:
                 alt = decoded.alternatives["temp_half40"]
                 if 0.0 <= alt <= 87.5:
-                    add(f"  {'':<26} {'':>10}   auch lesbar als "
+                    add(f"  {'':<34} {'':>10}   auch lesbar als "
                         f"{alt:.1f} C (Byte/2-40)")
 
     unmapped = log.unmapped_bytes()
@@ -475,11 +525,14 @@ def render_text(
     add("-" * 78)
     add("HINWEIS")
     add("-" * 78)
-    add("  Nachgewiesen sind Zeitstempel, Pruefsumme und die beiden")
+    confirmed = sum(1 for f in fields if f.spec.confidence == "bestaetigt")
+    likely = sum(1 for f in fields if f.spec.confidence == "wahrscheinlich")
+    add(f"  * = gegen den Home-Assistant-Verlauf abgeglichen ({confirmed} Felder)")
+    add(f"  ? = stimmte nur im Stillstand ueberein, nicht bewiesen ({likely} Felder)")
+    add("  Felder ohne Marke tragen Platzhalternamen -- ihre Bedeutung ist offen.")
+    add("  Nachgewiesen sind ausserdem Zeitstempel, Pruefsumme und beide")
     add("  Temperaturkodierungen (LE16/100 und Byte/2-40).")
-    add("  Welcher Offset welcher Sensor bzw. welche Einstellung ist, ist NICHT")
-    add("  nachgewiesen -- die Feldnamen sind Platzhalter. Zuordnung per")
-    add("  --diff / --csv gegen das FTC4-Display, siehe docs/LOG_FORMAT.md.")
+    add("  Zuordnung weiterer Felder: docs/HOME_ASSISTANT.md")
     return "\n".join(out)
 
 

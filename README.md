@@ -9,7 +9,7 @@ src/ha_correlate.py                  Logfelder <-> Home-Assistant-Sensoren
 src/dat_decoder.py                   SETTING/*.DAT: Records, Zeitprogramme
 src/log_decoder.py                   LOG/*.LOG: Report, Diff, Zeitreihe
 src/temperature_decoder.py           Rechenschicht: 0,5-°C-Kodierung
-tests/                               234 Tests
+tests/                               238 Tests
 docs/HOME_ASSISTANT.md               Werte aus HA holen und zuordnen
 docs/DAT_FORMAT.md                   DAT-Format: Record-Struktur
 docs/LOG_FORMAT.md                   LOG-Format: Aufbau und Feldzuordnung
@@ -121,9 +121,10 @@ Tests gegen echte Gerätedaten (`TestAgainstRealDeviceData`,
 | DAT: `ff ff` = nicht belegter Eintrag | bestätigt |
 | DAT: 35 Zeitfenster je SCH-Datei = 7 Tage × 5 | bestätigt |
 | LOG: Zeitstempel `YY MM DD HH MM`, Mitternacht als Stunde 24 | bestätigt an 473 Logs |
-| LOG: `LE16/100` und `Byte/2−40` als Temperatur | bestätigt |
+| LOG: `LE16/100` und `Byte/2−40` als Temperatur | bestätigt gegen HA-Sensoren |
+| LOG: 11 Feldbedeutungen (Vorlauf, Rücklauf, Außen, TWW-Speicher, …) | bestätigt gegen HA-Sensoren |
 | Sollwerte in HT&CL.DAT auf Offset `0x02`/`0x04` | **widerlegt** |
-| Bedeutung der einzelnen Records und Log-Felder | **offen** |
+| Bedeutung der übrigen Log-Felder und aller DAT-Records | **offen** |
 | Kodierung der Typ-`06`-Zeitfenster | **offen** |
 
 Details und Verifikationsverfahren: `docs/DAT_FORMAT.md` und `docs/LOG_FORMAT.md`.

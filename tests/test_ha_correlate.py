@@ -98,10 +98,16 @@ class TestAlign:
         assert [row[0] for row in aligned] == [s for s, _ in reference]
         assert all(row[2] == 9.0 for row in aligned)
 
-    def test_drops_points_beyond_max_gap(self):
+    def test_holds_state_forward(self):
+        """HA schreibt nur bei Aenderung -- der Zustand gilt weiter."""
         reference = samples([1.0] * 30)
-        candidate = [(BASE, 5.0)]
-        aligned = align(reference, candidate, max_gap_minutes=5)
+        aligned = align(reference, [(BASE, 5.0)])
+        assert len(aligned) == 30
+        assert all(row[2] == 5.0 for row in aligned)
+
+    def test_stops_holding_a_dead_sensor(self):
+        reference = samples([1.0] * 30)
+        aligned = align(reference, [(BASE, 5.0)], max_hold_minutes=5)
         assert len(aligned) == 6          # 22:00 bis 22:05
 
     def test_empty_inputs(self):
@@ -347,3 +353,41 @@ class TestMinimalResponse:
             {"state": "20.0", "last_changed": "2026-09-09T20:00:00+00:00"},
         ]]), encoding="utf-8")
         assert load_ha_history(path) == {}
+
+
+class TestOffsetDetectionIgnoresConstantSeries:
+    """Konstante Reihen passen bei jedem Versatz -- sie duerfen nicht zaehlen.
+
+    Sonst gewinnt der Versatz mit der kleinsten Ueberlappung, weil dort nur
+    noch die konstanten Sensoren uebrig bleiben.
+    """
+
+    @pytest.fixture
+    def log_dir(self, tmp_path):
+        target = tmp_path / "logs"
+        target.mkdir()
+        for minute in range(60):
+            raw = 4400 - minute * 10          # bewegt sich
+            (target / f"22{minute:02d}00.LOG").write_bytes(
+                build_log({0x4E: raw.to_bytes(2, "little"),
+                           0x54: (2500).to_bytes(2, "little")},   # konstant
+                          hour=22, minute=minute)
+            )
+        return target
+
+    def test_prefers_offset_that_matches_moving_series(self, tmp_path, log_dir):
+        path = tmp_path / "ha.json"
+        path.write_text(json.dumps([
+            ha_export("sensor.bewegt", [round(44.0 - m * 0.1, 2) for m in range(60)]),
+            ha_export("sensor.konstant", [25.0] * 60),
+        ]), encoding="utf-8")
+        offset, hits = detect_utc_offset(path, load_log_series(log_dir))
+        assert offset == 2.0
+        assert hits >= 1
+
+    def test_constant_only_export_yields_no_strong_hits(self, tmp_path, log_dir):
+        path = tmp_path / "ha.json"
+        path.write_text(json.dumps([ha_export("sensor.konstant", [25.0] * 60)]),
+                        encoding="utf-8")
+        _, hits = detect_utc_offset(path, load_log_series(log_dir))
+        assert hits == 0

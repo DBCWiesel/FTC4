@@ -85,6 +85,55 @@ als Temperatur ergäbe das −34,5 °C / −39,0 °C. Dort ist es also **kein**
 Temperaturbyte, sondern ein Modus- oder Statuscode. Der Decoder gibt das Byte
 deshalb roh aus und bietet die Temperaturlesart nur an, wo sie plausibel ist.
 
+## Zugeordnete Felder
+
+Abgeglichen gegen den ESPHome-Verlauf derselben Nacht (50 Sensoren aus Home
+Assistant, 473 Logs, Zeitversatz +2 h). Aufgenommen ist nur, was über den
+ganzen Zeitraum deckungsgleich lief **und** wo sich beide Reihen bewegt haben
+— ein Gleichstand zweier konstanter Reihen ist kein Beweis.
+
+| Offset | Kodierung | Sensor | Median-Abweichung |
+|--------|-----------|--------|-------------------|
+| `0x052` | LE16/100 | Vorlauftemperatur | 0,00 K |
+| `0x05a` | LE16/100 | Zone 1 Raumtemperatur | 0,00 K |
+| `0x05c` | LE16/100 | Zone 1 Raumtemperatur | 0,00 K |
+| `0x05e` | LE16/100 | Zone 1 Raumtemperatur | 0,00 K |
+| `0x061` | LE16/100 | Kältemittel Flüssigkeitstemperatur | 0,00 K |
+| `0x064` | Byte/2−40 | Außentemperatur | 0,00 K |
+| `0x065` | LE16/100 | Vorlauftemperatur | 0,00 K |
+| `0x068` | LE16/100 | Rücklauftemperatur | 0,00 K |
+| `0x06a` | Byte/2−40 | Kältemittel Flüssigkeitstemperatur | 0,00 K |
+| `0x06b` | LE16/100 | TWW-Speichertemperatur | 0,00 K |
+| `0x06d` | Byte/2−40 | TWW-Speichertemperatur | 0,00 K |
+
+Damit ist auch die `Byte/2−40`-Kodierung gegen benannte Sensoren belegt, nicht
+nur gegen den LE16-Nachbarwert.
+
+Bestätigt sich dabei die frühere Beobachtung: `0x052` und `0x065` tragen
+dieselbe Größe (Vorlauf), ebenso `0x06b`/`0x06d` (Speicher) und
+`0x061`/`0x06a` (Kältemittel) — jeweils in beiden Auflösungen.
+
+### Nur im Stillstand übereinstimmend
+
+Plausibel, aber nicht bewiesen. Diese Felder standen die ganze Nacht still,
+also passt jeder Sensor mit demselben Wert:
+
+| Offset | Wert | Kandidat |
+|--------|------|----------|
+| `0x04e` | 18,00 °C | Zone 1 Raum-Sollwert |
+| `0x056` | 43,00 °C | TWW-Sollwert |
+| `0x058` | 60,00 °C | Legionellenschutz-Temperatur |
+
+Zur Bestätigung braucht es einen Abzug aus einem Zeitraum, in dem sich diese
+Werte ändern.
+
+### Bewegt, aber ohne Gegenstück
+
+`0x060` (19,0–20,0 °C), `0x063` (22,5–24,0 °C) und `0x067` (25,5–27,0 °C)
+bewegen sich und liefern plausible Temperaturen, haben aber im HA-Export
+keinen passenden Sensor. Vermutlich Fühler, die das ESPHome-Modul nicht
+ausliest.
+
 ## Beobachteter Verlauf über die Nacht
 
 Aus 473 Logs, rein deskriptiv — keine Feldzuordnung, nur was die Zahlen tun:
@@ -169,7 +218,7 @@ Beobachtungen ohne Interpretation:
   sich in den 84 Minuten nicht geändert haben, oder Struktur ohne Nutzdaten.
 - Ob Logs mit anderer Firmware dasselbe Layout haben, ist ungeprüft. Die
   Prüfsummen- und Zeitstempelprüfung schlägt in dem Fall an.
-- Die Bedeutung der einzelnen Felder. Der Verlauf oben legt einiges nahe —
-  ein Wert, der über acht Stunden ohne Nachheizung von 44 auf 36,5 °C fällt,
-  verhält sich wie ein Speicherfühler — aber „verhält sich wie" ist kein
-  Nachweis. Dafür braucht es abgelesene Displaywerte.
+- Die Bedeutung der **übrigen** Felder. Elf sind über den HA-Abgleich
+  bestätigt (siehe oben), drei sind plausibel, der Rest ist offen. Für die
+  konstanten Felder braucht es einen Abzug aus einem Zeitraum, in dem sich der
+  jeweilige Wert bewegt.

@@ -130,11 +130,21 @@ class TestEncodings:
         log = FTC4Log(build_log({0x60: bytes([raw])}))
         assert field_by_key(log, "vor01").value == celsius
 
-    def test_status_byte_stays_raw_with_temperature_alternative(self, synthetic_log):
+    def test_confirmed_status_byte_is_read_as_temperature(self, synthetic_log):
+        """0x067 traegt nachweislich eine Temperatur im 0.5-Grad-Raster."""
         decoded = field_by_key(FTC4Log(synthetic_log), "rec01_status")
         assert decoded.raw == 131
-        assert decoded.value == 131          # roh, nicht umgerechnet
-        assert decoded.alternatives["temp_half40"] == 25.5
+        assert decoded.value == 25.5
+
+    def test_code_status_byte_stays_raw(self, synthetic_log):
+        """Die hinteren Statusbytes fuehren Codes, keine Temperaturen."""
+        data = bytearray(synthetic_log)
+        data[0x70] = 11
+        data[511] = (-sum(data[:511])) % 256
+        decoded = field_by_key(FTC4Log(bytes(data)), "rec04_status")
+        assert decoded.raw == 11
+        assert decoded.value == 11           # roh, nicht umgerechnet
+        assert decoded.alternatives["temp_half40"] == -34.5
 
     def test_implausible_value_is_flagged(self):
         log = FTC4Log(build_log({0x4E: (60000).to_bytes(2, "little")}))
@@ -220,7 +230,7 @@ class TestDiff:
         older = FTC4Log(build_log({0x4E: (2000).to_bytes(2, "little")}, minute=0), "000000.LOG")
         newer = FTC4Log(build_log({0x4E: (2050).to_bytes(2, "little")}, minute=1), "000100.LOG")
         text = render_diff(older, newer)
-        assert "Sollwert 01" in text
+        assert "0x04e" in text
         assert "+0.50" in text
 
     def test_reports_no_change(self, synthetic_log):
