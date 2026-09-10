@@ -5,10 +5,12 @@ Konfiguration (`*.DAT`) und Betriebslogs (`*.LOG`), je 512 Byte.
 
 ```
 src/decode_all.py                    ganzer Kartenabzug -> eine Textdatei
+src/ha_correlate.py                  Logfelder <-> Home-Assistant-Sensoren
 src/dat_decoder.py                   SETTING/*.DAT: Records, Zeitprogramme
 src/log_decoder.py                   LOG/*.LOG: Report, Diff, Zeitreihe
 src/temperature_decoder.py           Rechenschicht: 0,5-°C-Kodierung
-tests/                               195 Tests
+tests/                               234 Tests
+docs/HOME_ASSISTANT.md               Werte aus HA holen und zuordnen
 docs/DAT_FORMAT.md                   DAT-Format: Record-Struktur
 docs/LOG_FORMAT.md                   LOG-Format: Aufbau und Feldzuordnung
 docs/TEMPERATURE_DECODING.md         Temperaturkodierungen im Überblick
@@ -23,6 +25,19 @@ python3 -m src.decode_all /pfad/zum/kartenabzug -o ftc4.txt --csv reihe.csv
 Läuft über `SETTING/` und `LOG/` und schreibt einen zusammenhängenden
 Klartext-Report: Konfiguration Record für Record, Logs als Zeitreihe mit
 veränderlichen und konstanten Feldern, plus erstes und letztes Log im Detail.
+
+## Felder benennen
+
+Welcher Offset welcher Sensor ist, steht nicht fest. Wer ein ESPHome-Modul an
+der Wärmepumpe hat, bekommt die Zuordnung automatisch:
+
+```bash
+python3 -m src.ha_correlate ha.json data/logs --namen namen.json
+python3 -m src.log_decoder data/logs --names namen.json
+```
+
+Der Zeitversatz zwischen HA (UTC) und FTC4 (Ortszeit) wird selbst bestimmt.
+Wie man den Verlauf aus Home Assistant exportiert: `docs/HOME_ASSISTANT.md`.
 
 ## Konfigurationsdateien lesen
 

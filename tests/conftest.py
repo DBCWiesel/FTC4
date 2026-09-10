@@ -71,10 +71,11 @@ def real_ht_cl() -> bytes:
     ``data/`` kopiert, bekommt die Validierung gegen Geraetedaten automatisch
     mitgetestet.
     """
-    path = DATA_DIR / "HT_CL.DAT"
-    if not path.is_file():
-        pytest.skip(f"{path} nicht vorhanden - Validierung gegen Geraetedaten uebersprungen")
-    return path.read_bytes()
+    for name in ("HT&CL.DAT", "HT_CL.DAT"):
+        path = DATA_DIR / name
+        if path.is_file():
+            return path.read_bytes()
+    pytest.skip(f"Keine HT&CL.DAT in {DATA_DIR} - Validierung gegen Geraetedaten uebersprungen")
 
 
 # ----------------------------------------------------------------------
