@@ -6,11 +6,13 @@ Konfiguration (`*.DAT`) und Betriebslogs (`*.LOG`), je 512 Byte.
 ```
 src/decode_all.py                    ganzer Kartenabzug -> eine Textdatei
 src/ha_correlate.py                  Logfelder <-> Home-Assistant-Sensoren
+src/rc_settings.py                   Einstellungen anhand der Herstellertabelle
 src/dat_decoder.py                   SETTING/*.DAT: Records, Zeitprogramme
 src/log_decoder.py                   LOG/*.LOG: Report, Diff, Zeitreihe
 src/temperature_decoder.py           Rechenschicht: 0,5-°C-Kodierung
-tests/                               238 Tests
+tests/                               273 Tests
 docs/HOME_ASSISTANT.md               Werte aus HA holen und zuordnen
+docs/SD_TOOL.md                      was das Hersteller-Werkzeug preisgibt
 docs/DAT_FORMAT.md                   DAT-Format: Record-Struktur
 docs/LOG_FORMAT.md                   LOG-Format: Aufbau und Feldzuordnung
 docs/TEMPERATURE_DECODING.md         Temperaturkodierungen im Überblick
@@ -25,6 +27,17 @@ python3 -m src.decode_all /pfad/zum/kartenabzug -o ftc4.txt --csv reihe.csv
 Läuft über `SETTING/` und `LOG/` und schreibt einen zusammenhängenden
 Klartext-Report: Konfiguration Record für Record, Logs als Zeitreihe mit
 veränderlichen und konstanten Feldern, plus erstes und letztes Log im Detail.
+
+## Einstellungen benennen
+
+Mit der Definitionstabelle aus dem Hersteller-Werkzeug:
+
+```bash
+python3 -m src.rc_settings /pfad/SD_TOOL/Teigi/RCSetting_EN.xls data
+```
+
+Nennt je Eintrag Titel, Rohwert, erschlossenen Wert und dokumentierten Bereich.
+Siehe `docs/SD_TOOL.md`.
 
 ## Felder benennen
 
@@ -122,7 +135,9 @@ Tests gegen echte Gerätedaten (`TestAgainstRealDeviceData`,
 | DAT: 35 Zeitfenster je SCH-Datei = 7 Tage × 5 | bestätigt |
 | LOG: Zeitstempel `YY MM DD HH MM`, Mitternacht als Stunde 24 | bestätigt an 473 Logs |
 | LOG: `LE16/100` und `Byte/2−40` als Temperatur | bestätigt gegen HA-Sensoren |
-| LOG: 11 Feldbedeutungen (Vorlauf, Rücklauf, Außen, TWW-Speicher, …) | bestätigt gegen HA-Sensoren |
+| LOG: 13 Temperaturspalten + 7 Digitaleingänge benannt | Herstellertabelle, 11 davon gegengeprüft |
+| DAT: Typ `03`/`04` = BCD-Zahl bzw. BCD-Uhrzeit | bestätigt an 8 Werksvorgaben |
+| DAT: Byte-Nummern der Herstellertabelle sind Vielfache von 3 | bestätigt |
 | Sollwerte in HT&CL.DAT auf Offset `0x02`/`0x04` | **widerlegt** |
 | Bedeutung der übrigen Log-Felder und aller DAT-Records | **offen** |
 | Kodierung der Typ-`06`-Zeitfenster | **offen** |

@@ -123,8 +123,57 @@ class TestTemperatureRecords:
         assert DatRecord(0, 0, 0x02, 0x00, 0x4C).is_temperature is False
 
     def test_describe_variants(self):
-        assert DatRecord(0, 0, 0x03, 0x00, 5).describe() == "Wert 5"
         assert "16 Bit" in DatRecord(0, 0, 0x02, 0x89, 0x25).describe()
+        assert DatRecord(0, 0, 0x09, 0x00, 5).describe() == "Wert 5"
+
+
+class TestBcdRecords:
+    """Typ 0x03 und 0x04 sind BCD -- gegen die Werksvorgaben des Herstellers
+    geprueft: acht unveraenderte Werte in DHW.DAT und HOL.DAT kommen exakt
+    heraus."""
+
+    @pytest.mark.parametrize("hi, lo, expected", [
+        (0x01, 0x50, 15.0),    # HOL Zone1 Raumtemperatur, Werksvorgabe
+        (0x03, 0x50, 35.0),    # HOL Zone1 Vorlauftemperatur, Werksvorgabe
+        (0x01, 0x00, 10.0),    # DHW temp. drop, Werksvorgabe
+        (0x06, 0x00, 60.0),    # DHW max. operation time, Werksvorgabe
+        (0x00, 0x30, 3.0),     # DHW max. operation time (Stunden)
+        (0x12, 0x34, 123.4),
+    ])
+    def test_bcd_number(self, hi, lo, expected):
+        assert DatRecord(0, 0, 0x03, hi, lo).bcd_value == expected
+
+    def test_bcd_number_describes_itself(self):
+        assert DatRecord(0, 0, 0x03, 0x01, 0x50).describe() == "15  (BCD)"
+
+    @pytest.mark.parametrize("hi, lo, expected", [
+        (0x13, 0x00, "13:00"),
+        (0x00, 0x00, "00:00"),
+        (0x23, 0x59, "23:59"),
+    ])
+    def test_bcd_time(self, hi, lo, expected):
+        assert DatRecord(0, 0, 0x04, hi, lo).bcd_time == expected
+
+    def test_bcd_time_describes_itself(self):
+        assert DatRecord(0, 0, 0x04, 0x13, 0x00).describe() == "13:00 Uhr"
+
+    @pytest.mark.parametrize("hi, lo", [(0x0A, 0x00), (0x00, 0xFE), (0x7E, 0x00)])
+    def test_invalid_bcd_yields_none(self, hi, lo):
+        """Ein Halbbyte ueber 9 ist keine BCD-Ziffer."""
+        assert DatRecord(0, 0, 0x03, hi, lo).bcd_value is None
+
+    @pytest.mark.parametrize("hi, lo", [(0x25, 0x00), (0x13, 0x70)])
+    def test_impossible_time_yields_none(self, hi, lo):
+        assert DatRecord(0, 0, 0x04, hi, lo).bcd_time is None
+
+    def test_other_types_have_no_bcd(self):
+        assert DatRecord(0, 0, 0x0F, 0x01, 0x50).bcd_value is None
+        assert DatRecord(0, 0, 0x03, 0x13, 0x00).bcd_time is None
+
+    def test_unset_record_has_no_bcd(self):
+        record = DatRecord(0, 0, 0x03, 0xFF, 0xFF)
+        assert record.bcd_value is None
+        assert record.describe() == "nicht belegt"
 
 
 class TestSchedule:

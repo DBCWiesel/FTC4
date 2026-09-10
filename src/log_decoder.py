@@ -155,64 +155,100 @@ class DecodedField:
         }
 
 
-#: Am Home-Assistant-Verlauf bestaetigte Feldbedeutungen.
+#: Spaltennummer, Bezeichnung und Konfidenz je Byte-Offset.
 #:
-#: Abgeglichen wurden 473 Logs gegen den ESPHome-Verlauf derselben Nacht
-#: (50 Sensoren, Zeitversatz +2 h). Aufgenommen ist nur, was ueber den ganzen
-#: Zeitraum deckungsgleich lief und wo sich **beide** Reihen bewegt haben --
-#: ein Gleichstand zweier konstanter Reihen ist kein Beweis.
-CONFIRMED: Dict[int, str] = {
-    0x052: "Vorlauftemperatur",
-    0x05A: "Zone 1 Raumtemperatur",
-    0x05C: "Zone 1 Raumtemperatur",
-    0x05E: "Zone 1 Raumtemperatur",
-    0x061: "Kaeltemittel Fluessigkeitstemp",
-    0x064: "Aussentemperatur",
-    0x065: "Vorlauftemperatur",
-    0x068: "Ruecklauftemperatur",
-    0x06A: "Kaeltemittel Fluessigkeitstemp",
-    0x06B: "TWW Speichertemperatur",
-    0x06D: "TWW Speichertemperatur",
+#: Quelle ist die Spaltenbelegung des Hersteller-Werkzeugs (SD_TOOL): dessen
+#: CSV-Export benennt einen Teil der 225 Datenspalten, und Graph_Info1.txt
+#: ordnet die Temperaturkurven denselben Spaltennummern zu. Die Verankerung
+#: der Spalten auf die Byte-Offsets ergibt sich aus drei unabhaengig
+#: bestaetigten Fuehlern (Aussen, Vorlauf, Ruecklauf) und passt danach fuer
+#: den gesamten Block lueckenlos -- einschliesslich der sechs Records
+#: Zone1/Zone2/Kessel, die im Referenzabzug alle auf 25.00 mit den Codes
+#: 11/11/11/11/2/2 stehen, genau wie im Beispiel-Log des Herstellers.
+#:
+#: ``bestaetigt``      benannte Spalte, zusaetzlich am HA-Verlauf geprueft
+#: ``herstellername``  benannte Spalte, ohne eigenen Gegentest
+#: ``offen``           vom Hersteller selbst nur als ``DataNN`` gefuehrt
+FIELD_INFO: Dict[int, Tuple[int, str, str]] = {
+    0x04E: (72, "Data72", "offen"),
+    0x050: (73, "Data73", "offen"),
+    0x052: (74, "Data74", "offen"),
+    0x054: (75, "Data75", "offen"),
+    0x056: (76, "Data76", "offen"),
+    0x058: (77, "Data77", "offen"),
+    0x05A: (78, "Raumtemperatur (TH1a)", "bestaetigt"),
+    0x05C: (79, "Raumtemperatur Zone 2 (TH1b)", "herstellername"),
+    0x05E: (80, "Data80", "offen"),
+    0x060: (81, "Data81", "offen"),
+    0x061: (82, "Kaeltemittel fluessig (TH2)", "bestaetigt"),
+    0x063: (83, "Data83", "offen"),
+    0x064: (84, "Aussentemperatur (TH7)", "bestaetigt"),
+    0x065: (85, "Vorlauftemperatur (THW1)", "bestaetigt"),
+    0x067: (86, "Data86", "offen"),
+    0x068: (87, "Ruecklauftemperatur (THW2)", "bestaetigt"),
+    0x06A: (88, "Data88", "offen"),
+    0x06B: (89, "Warmwasser Speicher (THW5)", "bestaetigt"),
+    0x06D: (90, "Data90", "offen"),
+    0x06E: (91, "Vorlauf Zone 1 (THW6)", "herstellername"),
+    0x070: (92, "Data92", "offen"),
+    0x071: (93, "Ruecklauf Zone 1 (THW7)", "herstellername"),
+    0x073: (94, "Data94", "offen"),
+    0x074: (95, "Vorlauf Zone 2 (THW8)", "herstellername"),
+    0x076: (96, "Data96", "offen"),
+    0x077: (97, "Ruecklauf Zone 2 (THW9)", "herstellername"),
+    0x079: (98, "Data98", "offen"),
+    0x07A: (99, "Vorlauf Kessel (THWB1)", "herstellername"),
+    0x07C: (100, "Data100", "offen"),
+    0x07D: (101, "Ruecklauf Kessel (THWB2)", "herstellername"),
+    0x07F: (102, "Data102", "offen"),
+    0x080: (103, "Raumthermostat 1 (IN1)", "herstellername"),
+    0x081: (104, "Raumthermostat 2 (IN6)", "herstellername"),
+    0x082: (105, "Stroemungsschalter 1 (IN2)", "herstellername"),
+    0x083: (106, "Stroemungsschalter 2 (IN3)", "herstellername"),
+    0x084: (107, "Stroemungsschalter 3 (IN7)", "herstellername"),
+    0x085: (108, "Anforderung (IN4)", "herstellername"),
+    0x086: (109, "Aussenthermostat (IN5)", "herstellername"),
 }
 
-#: Bedeutungen, die nur im Stillstand uebereinstimmten -- plausibel, aber
-#: nicht bewiesen. Zur Bestaetigung braucht es einen Zeitraum, in dem sich
-#: der Wert aendert.
-LIKELY: Dict[int, str] = {
-    0x04E: "Zone 1 Raum-Sollwert?",
-    0x056: "TWW-Sollwert?",
-    0x058: "Legionellenschutz-Temp?",
+#: Beobachtungen aus dem Abgleich mit dem Home-Assistant-Verlauf, die ueber
+#: die Herstellerbenennung hinausgehen. Sie stehen als Anmerkung im Report,
+#: nicht als Feldname -- der Hersteller fuehrt diese Spalten ohne Namen.
+OBSERVED: Dict[int, str] = {
+    0x052: "lief deckungsgleich mit dem Vorlauf-Istwert; vermutlich ein Sollwert",
+    0x056: "43.00 C konstant, passt zum Warmwasser-Sollwert",
+    0x058: "60.00 C konstant, passt zur Legionellenschutz-Temperatur",
+    0x04E: "18.00 C konstant, passt zum Raum-Sollwert",
+    0x05E: "trug durchgehend denselben Wert wie 0x05a",
+    0x06A: "lief deckungsgleich mit der Kaeltemitteltemperatur",
+    0x06D: "trug durchgehend denselben Wert wie 0x06b",
 }
-
-#: Offsets ohne Treffer im HA-Verlauf, obwohl sich der Wert bewegt: 0x060
-#: (19.0-20.0 C), 0x063 (22.5-24.0 C) und 0x067 (25.5-27.0 C). Plausible
-#: Temperaturen, aber kein passender Sensor im Export -- vermutlich Fuehler,
-#: die das ESPHome-Modul nicht ausliest.
-UNMATCHED_TEMPERATURE_BYTES = frozenset({0x060, 0x063, 0x067})
 
 #: Offsets, deren Byte nachweislich eine Temperatur traegt (Byte/2-40).
 #: Die Statusbytes der hinteren Records fuehren dagegen kleine Codes (2, 11),
 #: die als Temperatur keinen Sinn ergeben.
 TEMPERATURE_BYTES = frozenset({0x060, 0x063, 0x067, 0x06A, 0x06D})
 
+#: Die digitalen Eingaenge sind Schaltzustaende, keine Messwerte.
+INPUT_BYTES = frozenset(range(0x080, 0x087))
+
 
 def _annotate(offset: int, fallback: str) -> Tuple[str, str, str]:
     """Liefert (label, confidence, note) fuer einen Offset."""
-    if offset in CONFIRMED:
-        return CONFIRMED[offset], "bestaetigt", "gegen Home-Assistant-Verlauf abgeglichen"
-    if offset in LIKELY:
-        return LIKELY[offset], "wahrscheinlich", "stimmte nur im Stillstand ueberein"
-    return fallback, "offen", ""
+    number, name, confidence = FIELD_INFO.get(offset, (0, "", "offen"))
+    note = OBSERVED.get(offset, "")
+    if number:
+        note = f"Spalte Data{number}" + (f"; {note}" if note else "")
+    return (name or fallback), confidence, note
 
 
 def _sensor_records() -> List[FieldSpec]:
-    """Die 9 Records ab 0x65: je LE16-Temperatur plus ein Statusbyte.
+    """Die 9 Records ab 0x65: je LE16-Temperatur plus ein Folgebyte.
 
-    Bei den vorderen Records traegt das Statusbyte nachweislich eine
-    Temperatur im 0.5-Grad-Raster -- 0x06d ist die TWW-Speichertemperatur und
-    0x06a die Kaeltemittel-Fluessigkeitstemperatur, beide gegen die benannten
-    Sensoren abgeglichen. Bei den hinteren Records steht dort ein kleiner
-    konstanter Code (2 bzw. 11), der als Temperatur keinen Sinn ergibt.
+    Die LE16-Werte sind die Fuehler THW1, THW2, THW5..THW9 und die beiden
+    Kesselfuehler. Das Folgebyte fuehrt bei den vorderen Records eine
+    plausible Temperatur im 0.5-Grad-Raster, bei den hinteren einen kleinen
+    Code (2 bzw. 11) -- im Beispiel-Log des Herstellers steht dort dasselbe
+    Muster.
     """
     specs: List[FieldSpec] = []
     for index, offset in enumerate(range(0x65, 0x80, 3), start=1):
@@ -221,33 +257,26 @@ def _sensor_records() -> List[FieldSpec]:
             FieldSpec(offset=offset, key=f"rec{index:02d}_wert", encoding=TEMP_CENTI,
                       group="messwerte", label=label, confidence=confidence, note=note)
         )
-        status_offset = offset + 2
-        label, confidence, note = _annotate(status_offset, f"Record {index:02d} Statusbyte")
-        is_temperature = status_offset in TEMPERATURE_BYTES
+        status = offset + 2
+        label, confidence, note = _annotate(status, f"Record {index:02d} Folgebyte")
         specs.append(
             FieldSpec(
-                offset=status_offset,
+                offset=status,
                 key=f"rec{index:02d}_status",
-                encoding=TEMP_HALF40 if is_temperature else RAW_U8,
+                encoding=TEMP_HALF40 if status in TEMPERATURE_BYTES else RAW_U8,
                 group="messwerte",
                 label=label,
                 confidence=confidence,
-                note=note or ("" if is_temperature else "als Temperatur: Byte/2-40"),
+                note=note,
             )
         )
     return specs
 
 
 def _build_layout() -> Tuple[FieldSpec, ...]:
-    """Das nachgewiesene Feldlayout einer FTC4-Logdatei.
-
-    Felder mit ``confidence="bestaetigt"`` tragen den Namen des Sensors, gegen
-    den sie abgeglichen wurden. Der Rest behaelt neutrale Platzhalter: welcher
-    Offset dort was bedeutet, ist nicht nachgewiesen.
-    """
+    """Das nachgewiesene Feldlayout einer FTC4-Logdatei."""
     specs: List[FieldSpec] = []
 
-    # 0x4e-0x5f: neun LE16-Werte.
     for index, offset in enumerate(range(0x4E, 0x60, 2), start=1):
         label, confidence, note = _annotate(offset, f"Sollwert {index:02d}")
         specs.append(
@@ -255,11 +284,10 @@ def _build_layout() -> Tuple[FieldSpec, ...]:
                       group="sollwerte", label=label, confidence=confidence, note=note)
         )
 
-    # 0x60-0x64: gemischte Einzelwerte vor dem Recordblock.
     for key, offset, encoding, fallback in (
         ("vor01", 0x60, TEMP_HALF40, "Einzelwert 0x60"),
         ("vor02_wert", 0x61, TEMP_CENTI, "Einzelwert 0x61"),
-        ("vor02_status", 0x63, TEMP_HALF40, "Statusbyte 0x63"),
+        ("vor02_status", 0x63, TEMP_HALF40, "Folgebyte 0x63"),
         ("vor03", 0x64, TEMP_HALF40, "Einzelwert 0x64"),
     ):
         label, confidence, note = _annotate(offset, fallback)
@@ -270,12 +298,22 @@ def _build_layout() -> Tuple[FieldSpec, ...]:
 
     specs += _sensor_records()
 
-    # Einzelbytes ausserhalb der Bloecke, die in den Referenzdateien belegt sind.
+    for offset in sorted(INPUT_BYTES):
+        label, confidence, note = _annotate(offset, f"Eingang 0x{offset:03x}")
+        specs.append(
+            FieldSpec(offset=offset, key=f"in{offset - 0x07F:02d}", encoding=RAW_U8,
+                      group="eingaenge", label=label, confidence=confidence, note=note)
+        )
+
     for offset in (0x06, 0x0A, 0x0C, 0x0E, 0x13, 0x14, 0x1A, 0x1C, 0x3D,
                    0x87, 0x88, 0x8E, 0x8F, 0xA3, 0xA4, 0xAC):
+        number = offset - 0x05 if offset <= 0x4C else 0
+        label = f"Data{number}" if number else f"Parameter 0x{offset:03x}"
         specs.append(
             FieldSpec(offset=offset, key=f"par{offset:03x}", encoding=RAW_U8,
-                      group="parameter", label=f"Parameter 0x{offset:03x}")
+                      group="parameter", label=label,
+                      note="Spaltenzuordnung abgeleitet, nicht einzeln geprueft"
+                           if number else "")
         )
 
     return tuple(specs)
@@ -450,8 +488,9 @@ class FTC4Log:
 # ----------------------------------------------------------------------
 
 _GROUP_TITLES = {
-    "sollwerte": "SOLLWERTE / EINSTELLUNGEN  (0x4e-0x5f, LE16/100)",
-    "messwerte": "MESSWERTE  (0x60-0x7f)",
+    "sollwerte": "BLOCK 0x4e-0x5f  (LE16/100, Spalten Data72-Data80)",
+    "messwerte": "MESSWERTE  (0x60-0x7f, Spalten Data81-Data102)",
+    "eingaenge": "DIGITALE EINGAENGE  (0x80-0x86, Spalten Data103-Data109)",
     "parameter": "WEITERE PARAMETER  (Einzelbytes, roh)",
     "sonstige": "SONSTIGE FELDER",
 }
@@ -484,7 +523,7 @@ def render_text(
         add("                                 Die Datei ist beschaedigt oder unvollstaendig kopiert.")
 
     fields = log.decode_all(layout)
-    for group in ("sollwerte", "messwerte", "parameter", "sonstige"):
+    for group in ("sollwerte", "messwerte", "eingaenge", "parameter", "sonstige"):
         in_group = [f for f in fields if f.spec.group == group]
         if not in_group:
             continue
@@ -494,7 +533,7 @@ def render_text(
         add("-" * 78)
         for decoded in in_group:
             label = decoded.spec.display_label(names)
-            marker = {"bestaetigt": " *", "wahrscheinlich": " ?"}.get(
+            marker = {"bestaetigt": " *", "herstellername": " +"}.get(
                 decoded.spec.confidence, "  ")
             line = (f"  {label:<32}{marker} {decoded.format_value():>10}"
                     f"   [0x{decoded.spec.offset:03x} = {decoded.hex:<5} roh {decoded.raw:>5}]")
@@ -526,10 +565,12 @@ def render_text(
     add("HINWEIS")
     add("-" * 78)
     confirmed = sum(1 for f in fields if f.spec.confidence == "bestaetigt")
-    likely = sum(1 for f in fields if f.spec.confidence == "wahrscheinlich")
-    add(f"  * = gegen den Home-Assistant-Verlauf abgeglichen ({confirmed} Felder)")
-    add(f"  ? = stimmte nur im Stillstand ueberein, nicht bewiesen ({likely} Felder)")
-    add("  Felder ohne Marke tragen Platzhalternamen -- ihre Bedeutung ist offen.")
+    vendor = sum(1 for f in fields if f.spec.confidence == "herstellername")
+    add(f"  * = benannte Spalte des Hersteller-Werkzeugs, zusaetzlich gegen den")
+    add(f"      Home-Assistant-Verlauf geprueft ({confirmed} Felder)")
+    add(f"  + = benannte Spalte des Hersteller-Werkzeugs ohne eigenen Gegentest "
+        f"({vendor} Felder)")
+    add("  DataNN = der Hersteller fuehrt die Spalte selbst ohne Namen.")
     add("  Nachgewiesen sind ausserdem Zeitstempel, Pruefsumme und beide")
     add("  Temperaturkodierungen (LE16/100 und Byte/2-40).")
     add("  Zuordnung weiterer Felder: docs/HOME_ASSISTANT.md")

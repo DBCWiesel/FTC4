@@ -13,3 +13,5 @@ output/
 # Geraetedaten von der SD-Karte gehoeren nicht ins Repository
 data/*.DAT
 data/logs/
+# Herstellertabellen gehoeren zum SD_TOOL, nicht hierher
+data/Teigi/

@@ -87,54 +87,49 @@ deshalb roh aus und bietet die Temperaturlesart nur an, wo sie plausibel ist.
 
 ## Zugeordnete Felder
 
-Abgeglichen gegen den ESPHome-Verlauf derselben Nacht (50 Sensoren aus Home
-Assistant, 473 Logs, Zeitversatz +2 h). Aufgenommen ist nur, was über den
-ganzen Zeitraum deckungsgleich lief **und** wo sich beide Reihen bewegt haben
-— ein Gleichstand zweier konstanter Reihen ist kein Beweis.
+Die Spaltennamen stammen aus dem Hersteller-Werkzeug (siehe `docs/SD_TOOL.md`).
+Elf davon wurden zusätzlich gegen den ESPHome-Verlauf derselben Nacht geprüft
+(473 Logs, 50 Sensoren, Zeitversatz +2 h) — dort mit Median-Abweichung 0,00 K.
 
-| Offset | Kodierung | Sensor | Median-Abweichung |
-|--------|-----------|--------|-------------------|
-| `0x052` | LE16/100 | Vorlauftemperatur | 0,00 K |
-| `0x05a` | LE16/100 | Zone 1 Raumtemperatur | 0,00 K |
-| `0x05c` | LE16/100 | Zone 1 Raumtemperatur | 0,00 K |
-| `0x05e` | LE16/100 | Zone 1 Raumtemperatur | 0,00 K |
-| `0x061` | LE16/100 | Kältemittel Flüssigkeitstemperatur | 0,00 K |
-| `0x064` | Byte/2−40 | Außentemperatur | 0,00 K |
-| `0x065` | LE16/100 | Vorlauftemperatur | 0,00 K |
-| `0x068` | LE16/100 | Rücklauftemperatur | 0,00 K |
-| `0x06a` | Byte/2−40 | Kältemittel Flüssigkeitstemperatur | 0,00 K |
-| `0x06b` | LE16/100 | TWW-Speichertemperatur | 0,00 K |
-| `0x06d` | Byte/2−40 | TWW-Speichertemperatur | 0,00 K |
+| Offset | Kodierung | Spalte | Bezeichnung | Gegengeprüft |
+|--------|-----------|--------|-------------|--------------|
+| `0x05a` | LE16/100 | Data78 | Raumtemperatur (TH1a) | ja |
+| `0x05c` | LE16/100 | Data79 | Raumtemperatur Zone 2 (TH1b) | – |
+| `0x061` | LE16/100 | Data82 | Kältemittel flüssig (TH2) | ja |
+| `0x064` | Byte/2−40 | Data84 | Außentemperatur (TH7) | ja |
+| `0x065` | LE16/100 | Data85 | Vorlauftemperatur (THW1) | ja |
+| `0x068` | LE16/100 | Data87 | Rücklauftemperatur (THW2) | ja |
+| `0x06b` | LE16/100 | Data89 | Warmwasser-Speicher (THW5) | ja |
+| `0x06e` | LE16/100 | Data91 | Vorlauf Zone 1 (THW6) | – |
+| `0x071` | LE16/100 | Data93 | Rücklauf Zone 1 (THW7) | – |
+| `0x074` | LE16/100 | Data95 | Vorlauf Zone 2 (THW8) | – |
+| `0x077` | LE16/100 | Data97 | Rücklauf Zone 2 (THW9) | – |
+| `0x07a` | LE16/100 | Data99 | Vorlauf Kessel (THWB1) | – |
+| `0x07d` | LE16/100 | Data101 | Rücklauf Kessel (THWB2) | – |
+| `0x080`–`0x086` | Byte | Data103–109 | Digitaleingänge IN1–IN7 | – |
 
-Damit ist auch die `Byte/2−40`-Kodierung gegen benannte Sensoren belegt, nicht
-nur gegen den LE16-Nachbarwert.
+### Korrekturen gegenüber dem reinen Sensorabgleich
 
-Bestätigt sich dabei die frühere Beobachtung: `0x052` und `0x065` tragen
-dieselbe Größe (Vorlauf), ebenso `0x06b`/`0x06d` (Speicher) und
-`0x061`/`0x06a` (Kältemittel) — jeweils in beiden Auflösungen.
+Die Herstellertabelle hat drei Zuordnungen widerlegt, die allein aus der
+Korrelation mit Home Assistant stammten:
 
-### Nur im Stillstand übereinstimmend
+| Offset | vorher behauptet | tatsächlich |
+|--------|------------------|-------------|
+| `0x05c` | Zone 1 Raumtemperatur | **Zone 2** Raumtemperatur (TH1b) |
+| `0x05e` | Zone 1 Raumtemperatur | `Data80`, vom Hersteller unbenannt |
+| `0x052` | Vorlauftemperatur | `Data74`, unbenannt — der Vorlauf ist `0x065` |
 
-Plausibel, aber nicht bewiesen. Diese Felder standen die ganze Nacht still,
-also passt jeder Sensor mit demselben Wert:
+Der Grund ist derselbe in allen drei Fällen: **eine Korrelation kann zwei
+Reihen nicht unterscheiden, die denselben Wert tragen.** `0x05a`, `0x05c` und
+`0x05e` standen die ganze Nacht auf 22,50 °C, und `0x052` lief deckungsgleich
+mit dem Vorlauf-Istwert. Alle passten gleich gut.
 
-| Offset | Wert | Kandidat |
-|--------|------|----------|
-| `0x04e` | 18,00 °C | Zone 1 Raum-Sollwert |
-| `0x056` | 43,00 °C | TWW-Sollwert |
-| `0x058` | 60,00 °C | Legionellenschutz-Temperatur |
+Ebenso zurückgenommen: `0x06a` und `0x06d` sind `Data88` und `Data90` und beim
+Hersteller unbenannt. Dass `0x06d` durchgehend denselben Wert wie der
+Speicherfühler trägt, bleibt eine Beobachtung — auch das Beispiel-Log des
+Herstellers zeigt es so — aber kein Name.
 
-Zur Bestätigung braucht es einen Abzug aus einem Zeitraum, in dem sich diese
-Werte ändern.
-
-### Bewegt, aber ohne Gegenstück
-
-`0x060` (19,0–20,0 °C), `0x063` (22,5–24,0 °C) und `0x067` (25,5–27,0 °C)
-bewegen sich und liefern plausible Temperaturen, haben aber im HA-Export
-keinen passenden Sensor. Vermutlich Fühler, die das ESPHome-Modul nicht
-ausliest.
-
-## Beobachteter Verlauf über die Nacht
+## Beobachteter Verlauf## Beobachteter Verlauf über die Nacht
 
 Aus 473 Logs, rein deskriptiv — keine Feldzuordnung, nur was die Zahlen tun:
 
@@ -218,7 +213,9 @@ Beobachtungen ohne Interpretation:
   sich in den 84 Minuten nicht geändert haben, oder Struktur ohne Nutzdaten.
 - Ob Logs mit anderer Firmware dasselbe Layout haben, ist ungeprüft. Die
   Prüfsummen- und Zeitstempelprüfung schlägt in dem Fall an.
-- Die Bedeutung der **übrigen** Felder. Elf sind über den HA-Abgleich
-  bestätigt (siehe oben), drei sind plausibel, der Rest ist offen. Für die
-  konstanten Felder braucht es einen Abzug aus einem Zeitraum, in dem sich der
-  jeweilige Wert bewegt.
+- Die Bedeutung der Felder, die der Hersteller selbst nur als `DataNN` führt —
+  darunter der ganze Block `Data72`–`Data77` (`0x04e`–`0x058`). Die Werte
+  18,00 / 20,00 / 28,00 / 35,00 / 43,00 / 60,00 °C sehen nach Sollwerten aus,
+  und 43 °C bzw. 60 °C decken sich mit dem Warmwasser-Sollwert und der
+  Legionellenschutz-Temperatur aus Home Assistant. Belegt ist es nicht.
+- Die Folgebytes der Records (`Data86`, `Data88`, `Data90`, `Data92` …).

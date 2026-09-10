@@ -25,6 +25,14 @@ Beobachtete Typbytes: 0x01..0x09 und 0x0f. Sicher gedeutet ist bisher:
     ergibt. Der Decoder gibt deshalb immer den Rohwert aus und die
     Temperaturlesart nur als gekennzeichneten Zusatz.
 
+``0x03``
+    Eine Zahl in BCD mit einer Nachkommastelle: ``03 01 50`` sind die Ziffern
+    0,1,5,0 und damit 15.0. Gegen die Werksvorgaben der Herstellertabelle
+    geprueft -- acht von acht unveraenderten Werten kommen exakt heraus.
+
+``0x04``
+    Eine Uhrzeit in BCD: ``04 13 00`` ist 13:00.
+
 ``HI == 0xff und LO == 0xff``
     Nicht belegter Eintrag. In allen Dateien konsistent.
 
@@ -72,6 +80,12 @@ PLAUSIBLE_CELSIUS = (0.0, 90.0)
 #: Typbyte der Zeitfenster in den SCH-Dateien.
 TYPE_SCHEDULE = 0x06
 
+#: Typbyte fuer BCD-Zahlen mit einer Nachkommastelle.
+TYPE_BCD_NUMBER = 0x03
+
+#: Typbyte fuer BCD-Uhrzeiten (HHMM).
+TYPE_BCD_TIME = 0x04
+
 #: Datenbytes eines nicht belegten Eintrags.
 UNSET = (0xFF, 0xFF)
 
@@ -94,6 +108,16 @@ FILE_PURPOSE: Dict[str, str] = {
 
 class DatDecodeError(ValueError):
     """Fehler beim Einlesen oder Dekodieren einer DAT-Datei."""
+
+
+def bcd_digits(hi: int, lo: int) -> Optional[Tuple[int, int, int, int]]:
+    """Die vier BCD-Ziffern von ``HI:LO``; ``None``, wenn keine gueltige BCD.
+
+    Ein Halbbyte groesser als 9 ist keine BCD-Ziffer -- daran erkennt man, dass
+    ein Record diese Kodierung nicht verwendet.
+    """
+    digits = (hi >> 4, hi & 0x0F, lo >> 4, lo & 0x0F)
+    return None if any(d > 9 for d in digits) else digits
 
 
 @dataclass(frozen=True)
@@ -139,6 +163,39 @@ class DatRecord:
         return self.celsius_plausible
 
     @property
+    def bcd_value(self) -> Optional[float]:
+        """Typ 0x03: vierstellige BCD-Zahl mit einer Nachkommastelle.
+
+        ``03 01 50`` sind die Ziffern 0,1,5,0 und damit 15.0. An den
+        Werksvorgaben aus der Herstellertabelle geprueft: acht von acht
+        unveraenderten Werten in DHW.DAT und HOL.DAT kommen exakt heraus.
+        """
+        if self.type != TYPE_BCD_NUMBER or self.is_unset:
+            return None
+        digits = bcd_digits(self.hi, self.lo)
+        if digits is None:
+            return None
+        return (digits[0] * 1000 + digits[1] * 100 + digits[2] * 10 + digits[3]) / 10
+
+    @property
+    def bcd_time(self) -> Optional[str]:
+        """Typ 0x04: Uhrzeit als BCD ``HHMM``.
+
+        ``04 13 00`` ist 13:00. ``None``, wenn die Ziffern keine gueltige
+        Uhrzeit ergeben.
+        """
+        if self.type != TYPE_BCD_TIME or self.is_unset:
+            return None
+        digits = bcd_digits(self.hi, self.lo)
+        if digits is None:
+            return None
+        hour = digits[0] * 10 + digits[1]
+        minute = digits[2] * 10 + digits[3]
+        if hour > 23 or minute > 59:
+            return None
+        return f"{hour:02d}:{minute:02d}"
+
+    @property
     def be16(self) -> int:
         """Die beiden Datenbytes als 16-Bit-Wert, HI zuerst."""
         return self.hi * 256 + self.lo
@@ -151,6 +208,10 @@ class DatRecord:
         """Beste belegbare Deutung des Records als kurzer Text."""
         if self.is_unset:
             return "nicht belegt"
+        if self.bcd_time is not None:
+            return f"{self.bcd_time} Uhr"
+        if self.bcd_value is not None:
+            return f"{self.bcd_value:g}  (BCD)"
         if self.is_single_value:
             reading = f"Wert {self.lo:3d}"
             if self.celsius_plausible:
@@ -172,6 +233,8 @@ class DatRecord:
             "single_value": self.is_single_value,
             "celsius": self.celsius,
             "celsius_plausible": self.celsius_plausible,
+            "bcd_value": self.bcd_value,
+            "bcd_time": self.bcd_time,
             "description": self.describe(),
         }
 

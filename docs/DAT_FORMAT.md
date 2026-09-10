@@ -78,6 +78,19 @@ unter demselben Typ Werte bis 230, die als Temperatur (115 °C) unsinnig wären.
 Der Decoder gibt deshalb immer den Rohwert aus und die Temperaturlesart nur
 als gekennzeichneten Zusatz, mit Plausibilitätsmarkierung.
 
+### Typ `0x03` = BCD-Zahl, Typ `0x04` = BCD-Uhrzeit
+
+Eine vierstellige BCD-Zahl mit einer Nachkommastelle: `03 01 50` sind die
+Ziffern 0,1,5,0 und damit 15,0. Typ `04` ist dasselbe als Uhrzeit — `04 13 00`
+ist 13:00.
+
+Gegen die Werksvorgaben der Herstellertabelle geprüft: **acht unveränderte
+Werte** in `DHW.DAT` und `HOL.DAT` kommen exakt heraus, zwölf von dreizehn
+liegen im dokumentierten Bereich.
+
+Ein Halbbyte über 9 ist keine gültige BCD-Ziffer — daran erkennt der Decoder,
+dass ein Record diese Kodierung nicht verwendet.
+
 ### Typ `0x06` = Zeitfenster
 
 Jede SCH-Datei enthält genau **35** Records dieses Typs = 7 Tage × 5 Fenster.
@@ -94,6 +107,13 @@ In `SCH_1.DAT` ist das Muster für alle sieben Tage identisch:
 Also zwei belegte Fenster pro Tag, jeden Tag gleich. Wie die zwei Datenbytes
 Uhrzeit und Sollwert kodieren, ist **nicht** geklärt; ebenso wenig, welcher
 Gruppenindex Montag ist.
+
+## Bestätigung durch den Hersteller
+
+`Teigi/RCSetting_EN.xls` aus dem SD_TOOL führt zu jeder Einstellung die
+Byte-Nummer in der SD-Datei. **Jede dieser Nummern ist ein Vielfaches von
+drei** — die 3-Byte-Recordstruktur ist damit unabhängig von der eigenen
+Analyse belegt. Details und Verwendung: `docs/SD_TOOL.md`.
 
 ## Widerlegte Annahme
 
